@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 
 from google import genai
 from google.genai import types
@@ -14,6 +15,22 @@ logger = logging.getLogger(__name__)
 
 MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_BACKOFF_SECONDS = 2
+IDLE_WATCHDOG_INTERVAL = 5.0
+
+
+class CallEndedIntentionally(Exception):
+    """Base para fines de llamada deliberados (no fallos de conexión) - no
+    deben disparar reintentos en run_with_reconnect."""
+
+
+class CallEndedByIdle(CallEndedIntentionally):
+    """El cliente lleva demasiado tiempo en silencio - colgamos la llamada
+    a propósito."""
+
+
+class CallEndedByModel(CallEndedIntentionally):
+    """El propio modelo decidió terminar la llamada (llamó a
+    finalizar_llamada tras despedirse)."""
 
 
 class PizzeriaCallSession:
@@ -27,6 +44,8 @@ class PizzeriaCallSession:
         self.tool_router = tool_router
         self.session = None
         self._out_queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self._last_user_activity = time.monotonic()
+        self._idle_checkin_sent = False
 
     async def _listen_microphone(self) -> None:
         count = 0
@@ -85,14 +104,81 @@ class PizzeriaCallSession:
                         # mate el TaskGroup y corte la sesión sin que el cliente oiga nada.
                         logger.exception("Error procesando tool_call, la sesión sigue")
                 content = response.server_content
+                if content and content.interrupted:
+                    # El cliente empezó a hablar mientras el modelo aún estaba
+                    # sonando por el altavoz (barge-in). El turno se corta a
+                    # medias server-side - el resumen que se estaba diciendo
+                    # puede haberse quedado incompleto, y el próximo turno del
+                    # modelo puede parecer que "repite" cuando en realidad está
+                    # terminando de decir lo que no llegó a decir.
+                    logger.info("Turno del modelo INTERRUMPIDO por el cliente (barge-in).")
                 if content and content.output_transcription:
                     logger.info("Modelo: %s", content.output_transcription.text)
                 if content and content.input_transcription:
                     logger.info("Usuario: %s", content.input_transcription.text)
+                    self._last_user_activity = time.monotonic()
+                    self._idle_checkin_sent = False
+            if self.tool_router.debe_colgar:
+                # El modelo ya llamó a finalizar_llamada en este turno (tras
+                # despedirse). Esperamos a que el altavoz termine de sonar
+                # ANTES de colgar, para no cortar la despedida a media frase.
+                logger.info("El modelo ha decidido terminar la llamada.")
+                await self.audio_io.wait_until_speaker_drained()
+                raise CallEndedByModel("finalizar_llamada invocada por el modelo")
             # Turno completo (o interrumpido): descarta audio de salida que
             # aún no se ha reproducido, para que el barge-in del usuario corte
             # limpio la respuesta anterior en vez de seguir sonando encima.
             self.audio_io.clear_output_buffer()
+
+    async def _idle_watchdog(self) -> None:
+        """Si el cliente lleva callado más de idle_checkin_seconds, le
+        preguntamos si sigue ahí; si sigue sin decir nada hasta
+        idle_hangup_seconds, colgamos. El aviso va por send_realtime_input
+        (parámetro text), no por send_client_content — mezclar ese con el
+        streaming continuo de audio es lo que el SDK desaconseja; text en
+        send_realtime_input viaja por el mismo canal que el audio.
+
+        Si el pedido ya está confirmado, no preguntamos "¿sigues ahí?" (no
+        tiene sentido, ya no hay nada pendiente) — directamente le pedimos
+        al modelo que se despida y cuelgue con finalizar_llamada, que ya
+        espera a que el altavoz termine de sonar antes de cortar. Si ni con
+        eso reacciona, cortamos sin despedida como último recurso."""
+        while True:
+            await asyncio.sleep(IDLE_WATCHDOG_INTERVAL)
+            idle_for = time.monotonic() - self._last_user_activity
+
+            if self.tool_router.order.confirmado:
+                if idle_for > settings.idle_hangup_after_confirm_seconds:
+                    raise CallEndedByIdle(
+                        f"{idle_for:.0f}s de silencio tras confirmar (el modelo no colgó solo "
+                        "ni siquiera tras pedírselo)"
+                    )
+                if (
+                    idle_for > settings.idle_post_confirm_nudge_seconds
+                    and not self._idle_checkin_sent
+                ):
+                    logger.info(
+                        "Pedido confirmado, cliente en silencio %.0fs - pidiendo despedida.",
+                        idle_for,
+                    )
+                    self._idle_checkin_sent = True
+                    await self.session.send_realtime_input(
+                        text="(El pedido ya está confirmado y el cliente no responde. "
+                        "Despídete brevemente y cuelga la llamada llamando a "
+                        "finalizar_llamada.)"
+                    )
+                continue
+
+            if idle_for > settings.idle_hangup_seconds:
+                raise CallEndedByIdle(f"{idle_for:.0f}s sin actividad del cliente")
+
+            if idle_for > settings.idle_checkin_seconds and not self._idle_checkin_sent:
+                logger.info("Cliente en silencio %.0fs - preguntando si sigue ahí.", idle_for)
+                self._idle_checkin_sent = True
+                await self.session.send_realtime_input(
+                    text="(El cliente lleva un rato en silencio. Pregúntale brevemente "
+                    "si sigue ahí.)"
+                )
 
     def _opening_prompt(self) -> str:
         """Instrucción interna para arrancar el turno del modelo sin esperar
@@ -100,16 +186,19 @@ class PizzeriaCallSession:
         sesión viene de una reconexión), se lo contamos al modelo para que
         siga la conversación en vez de saludar como si fuera una llamada nueva."""
         order = self.tool_router.order
-        if not order.items and not order.direccion and not order.telefono:
+        hay_algo_ya = order.items or order.tipo_entrega or order.nombre_cliente or order.direccion
+        if not hay_algo_ya and not order.telefono:
             return "(Empieza la llamada saludando al cliente.)"
 
         items_resumen = (
-            ", ".join(f"{i.cantidad}x {i.pizza} ({i.tamano})" for i in order.items)
+            ", ".join(f"[id {i.item_id}] {i.cantidad}x {i.pizza} ({i.tamano})" for i in order.items)
             or "ninguna pizza todavía"
         )
         return (
             "(Se ha reconectado la llamada tras un corte de red. No saludes de "
             f"nuevo desde cero. Pedido hasta ahora: {items_resumen}. "
+            f"Tipo de entrega: {order.tipo_entrega or 'aún no lo tienes'}. "
+            f"Nombre: {order.nombre_cliente or 'aún no lo tienes'}. "
             f"Dirección: {order.direccion or 'aún no la tienes'}. "
             f"Teléfono: {order.telefono or 'aún no lo tienes'}. "
             "Continúa la conversación con el cliente para terminar de tomar el pedido.)"
@@ -129,6 +218,7 @@ class PizzeriaCallSession:
             model=settings.gemini_model, config=config
         ) as session:
             self.session = session
+            self._last_user_activity = time.monotonic()
             logger.info("Llamada conectada.")
             # Dispara el saludo inicial sin esperar a que el cliente hable primero.
             # send_client_content "prellena" la conversación; es el uso recomendado
@@ -142,6 +232,7 @@ class PizzeriaCallSession:
                 tg.create_task(self._listen_microphone())
                 tg.create_task(self._send_audio())
                 tg.create_task(self._receive_and_play())
+                tg.create_task(self._idle_watchdog())
 
 
 async def run_with_reconnect() -> None:
@@ -160,10 +251,17 @@ async def run_with_reconnect() -> None:
     attempt = 0
     try:
         while attempt < MAX_RECONNECT_ATTEMPTS:
+            # except* no admite return/break/continue dentro del propio bloque
+            # (PEP 654) - de ahí la bandera en vez de un return directo.
+            call_ended_on_purpose = False
             try:
                 session = PizzeriaCallSession(client, audio_io, tool_router)
                 await session.run()
                 return  # salida limpia (ej. Ctrl+C dentro del TaskGroup)
+            except* CallEndedIntentionally as eg:
+                for exc in eg.exceptions:
+                    logger.info("Llamada terminada: %s", exc)
+                call_ended_on_purpose = True
             except* Exception as eg:
                 attempt += 1
                 logger.error(
@@ -176,12 +274,14 @@ async def run_with_reconnect() -> None:
                     logger.error("Máximo de reintentos alcanzado, abortando.")
                     raise
                 await asyncio.sleep(RECONNECT_BACKOFF_SECONDS * attempt)
+            if call_ended_on_purpose:
+                return
     finally:
         audio_io.close()
 
 
 def run() -> None:
-    setup_logging()
+    setup_logging(settings.log_level)
     try:
         asyncio.run(run_with_reconnect())
     except KeyboardInterrupt:

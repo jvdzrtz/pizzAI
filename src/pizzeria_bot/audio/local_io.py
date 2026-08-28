@@ -198,6 +198,24 @@ class LocalAudioIO:
         with self._output_lock:
             self._output_buffer.clear()
 
+    async def wait_until_speaker_drained(
+        self, timeout: float = 10.0, poll_interval: float = 0.2
+    ) -> None:
+        """Espera a que el altavoz termine de reproducir lo que ya tiene en
+        cola. Úsalo antes de colgar la llamada, para no cortar a media frase
+        una despedida que el modelo ya generó pero que el altavoz aún no
+        terminó de sonar."""
+        elapsed = 0.0
+        while elapsed < timeout:
+            with self._output_lock:
+                if not self._output_buffer:
+                    return
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+        logger.warning(
+            "wait_until_speaker_drained: timeout tras %.1fs, seguimos igualmente", timeout
+        )
+
     def close(self) -> None:
         if self._watchdog_task is not None:
             self._watchdog_task.cancel()

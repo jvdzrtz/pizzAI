@@ -7,8 +7,8 @@ from google.genai import types
 
 from pizzeria_bot.agents.prompts import SYSTEM_PROMPT
 from pizzeria_bot.agents.tools import TOOLS, ToolRouter
-from pizzeria_bot.audio.local_io import LocalAudioIO
-from pizzeria_bot.config import settings
+from pizzeria_bot.audio.protocol import AudioIO
+from pizzeria_bot.config import require_gemini_api_key, settings
 from pizzeria_bot.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -36,9 +36,7 @@ class CallEndedByModel(CallEndedIntentionally):
 class PizzeriaCallSession:
     """Una llamada = una sesión con Gemini Live + un ToolRouter propio."""
 
-    def __init__(
-        self, client: genai.Client, audio_io: LocalAudioIO, tool_router: ToolRouter
-    ) -> None:
+    def __init__(self, client: genai.Client, audio_io: AudioIO, tool_router: ToolRouter) -> None:
         self.client = client
         self.audio_io = audio_io
         self.tool_router = tool_router
@@ -121,9 +119,12 @@ class PizzeriaCallSession:
             if self.tool_router.debe_colgar:
                 # El modelo ya llamó a finalizar_llamada en este turno (tras
                 # despedirse). Esperamos a que el altavoz termine de sonar
-                # ANTES de colgar, para no cortar la despedida a media frase.
+                # ANTES de colgar, para no cortar la despedida a media frase,
+                # y luego un margen extra con el micro aún abierto por si el
+                # cliente responde con su propio "hasta luego" a la vez.
                 logger.info("El modelo ha decidido terminar la llamada.")
                 await self.audio_io.wait_until_speaker_drained()
+                await asyncio.sleep(settings.hangup_grace_seconds)
                 raise CallEndedByModel("finalizar_llamada invocada por el modelo")
             # Turno completo (o interrumpido): descarta audio de salida que
             # aún no se ha reproducido, para que el barge-in del usuario corte
@@ -235,19 +236,20 @@ class PizzeriaCallSession:
                 tg.create_task(self._idle_watchdog())
 
 
-async def run_with_reconnect() -> None:
+async def run_with_reconnect(
+    client: genai.Client, audio_io: AudioIO, tool_router: ToolRouter
+) -> None:
     """
     Envuelve la sesión con reintentos con backoff. Un corte de red no debe
-    tirar el proceso entero — solo la sesión actual, y se reconecta.
-    """
-    client = genai.Client(api_key=settings.gemini_api_key)
-    audio_io = LocalAudioIO()
-    audio_io.open()
-    # Vive fuera del bucle de reintentos a propósito: si hay un corte de red
-    # a mitad de pedido, reconectar no debe borrar las pizzas que el cliente
-    # ya había confirmado.
-    tool_router = ToolRouter()
+    tirar la llamada entera — solo la sesión de Gemini, y se reconecta
+    manteniendo el mismo audio_io y tool_router (el pedido no se pierde).
 
+    audio_io y tool_router se reciben como parámetros (no se crean aquí)
+    para que esta misma función sirva tanto para la CLI local (LocalAudioIO,
+    ver run() más abajo) como para el servidor Twilio (TwilioAudioIO, una
+    instancia por llamada entrante, en server.py).
+    """
+    audio_io.open()
     attempt = 0
     try:
         while attempt < MAX_RECONNECT_ATTEMPTS:
@@ -281,9 +283,24 @@ async def run_with_reconnect() -> None:
 
 
 def run() -> None:
+    """Punto de entrada de la CLI local (micro/altavoz del propio equipo).
+
+    Import de LocalAudioIO deliberadamente perezoso, aquí dentro y no a
+    nivel de módulo: LocalAudioIO tira de pyaudiowpatch (Windows-only), y
+    server.py importa run_with_reconnect de este mismo módulo para el modo
+    Twilio en Linux - un import a nivel de módulo rompería el servidor
+    entero en cualquier plataforma sin pyaudiowpatch instalado."""
+    from pizzeria_bot.audio.local_io import LocalAudioIO
+
     setup_logging(settings.log_level)
     try:
-        asyncio.run(run_with_reconnect())
+        client = genai.Client(api_key=require_gemini_api_key())
+        audio_io = LocalAudioIO()
+        # Vive fuera del bucle de reintentos de run_with_reconnect a propósito:
+        # si hay un corte de red a mitad de pedido, reconectar no debe borrar
+        # las pizzas que el cliente ya había confirmado.
+        tool_router = ToolRouter()
+        asyncio.run(run_with_reconnect(client, audio_io, tool_router))
     except KeyboardInterrupt:
         logger.info("Llamada terminada por el usuario.")
 

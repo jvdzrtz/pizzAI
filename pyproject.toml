@@ -17,6 +17,17 @@ dependencies = [
 audio-windows = [
     "PyAudioWPatch>=0.2.12.8; sys_platform == 'win32'",
 ]
+# Servidor de telefonía real (Twilio Media Streams). audioop-lts porque el
+# módulo audioop se quitó de la stdlib en Python 3.13+ (lo usa audio/codecs.py
+# para la conversión mu-law<->PCM); en 3.11/3.12 ya viene en la stdlib, de
+# ahí el marcador de versión.
+twilio = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "audioop-lts>=0.2.1; python_version >= '3.13'",
+    "twilio>=9.0",
+    "python-multipart>=0.0.9",  # Starlette lo necesita para parsear el POST form-urlencoded de Twilio
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
@@ -24,6 +35,7 @@ dev = [
 
 [project.scripts]
 pizzai = "pizzeria_bot.main:run"
+pizzai-call = "pizzeria_bot.outbound_call:main"
 
 [build-system]
 requires = ["hatchling"]

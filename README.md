@@ -43,40 +43,41 @@ Todos estos tiempos de silencio son configurables por `.env` (ver
 ## Arquitectura
 
 ```
-┌─────────────────┐     audio (mic/altavoz)     ┌──────────────────┐
-│   LocalAudioIO   │ ◄─────────────────────────► │  PizzeriaCall    │
-│  (audio/)        │                              │  Session (main.py)│
-└─────────────────┘                              └────────┬─────────┘
-                                                            │ tool_call
-                                                   ┌────────▼─────────┐
-                                                   │   ToolRouter      │
-                                                   │   (agents/)       │
-                                                   └────────┬─────────┘
-                                                            │
-                                                   ┌────────▼─────────┐
-                                                   │      Order        │
-                                                   │   (domain/)        │
-                                                   └───────────────────┘
+Teléfono real (Twilio) ─┐
+                        ├─▶ AudioIO ─▶ PizzeriaCallSession (main.py) ◀───▶ Gemini Live API
+Mic / altavoz local    ─┘                                    │
+                                                               │ tool_call
+                                                               ▼
+                                                          ToolRouter (agents/) ─▶ Order (domain/)
 ```
 
+- **`audio/`** — dos implementaciones de la misma interfaz (`AudioIO` en
+  `protocol.py`): `LocalAudioIO` (micro/altavoz) y `TwilioAudioIO` (llamada
+  real vía Media Streams, con `codecs.py` convirtiendo el mu-law 8kHz de
+  Twilio al PCM16 16/24kHz que espera Gemini). `PizzeriaCallSession` no sabe
+  ni le importa cuál de las dos está usando.
+- **`main.py`** — `PizzeriaCallSession` mantiene la sesión streaming con
+  Gemini Live: reenvía el audio en ambas direcciones y recibe un
+  `tool_call` cada vez que el modelo decide actuar sobre el pedido.
+- **`agents/`** — `ToolRouter` traduce cada `tool_call` en un método de
+  `Order` y devuelve el resultado (o el error de negocio) para que Gemini
+  lo lea y siga la conversación.
 - **`domain/`** — reglas de negocio del pedido (Pydantic). No sabe nada
   de Gemini, audio, ni telefonía. 100% testeable sin mocks.
-- **`agents/`** — tools y prompt del agente de voz. Traduce entre el
-  esquema que entiende Gemini y el dominio.
-- **`audio/`** — entrada/salida de audio, intercambiable (`AudioIO`
-  en `protocol.py`): `LocalAudioIO` (micro/altavoz local) y
-  `TwilioAudioIO` (llamada telefónica real vía Media Streams,
-  con `codecs.py` para la conversión mu-law↔PCM y el resampling
-  8kHz↔16/24kHz) implementan la misma interfaz — `PizzeriaCallSession`
-  no sabe ni le importa cuál de las dos está usando.
-- **`main.py`** — `PizzeriaCallSession` orquesta una llamada: conecta la
-  sesión de Gemini Live, reenvía audio, y ejecuta tool calls con
-  reconexión automática. `run()` es el punto de entrada de la CLI local.
-- **`server.py`** — servidor FastAPI para llamadas reales: recibe el
-  webhook de Twilio (`POST /voice/incoming`) y el Media Stream
-  (`WebSocket /media-stream`). Cada llamada entrante crea su propio
-  `TwilioAudioIO` + `ToolRouter` y reutiliza la misma
-  `run_with_reconnect` que la CLI — un pedido por llamada, aislado.
+- **`server.py`** — solo entra en juego para llamadas reales: FastAPI
+  recibe el webhook de Twilio (`POST /voice/incoming`, valida su firma y
+  devuelve TwiML) y el Media Stream (`WebSocket /media-stream`); por cada
+  llamada crea un `TwilioAudioIO` + `ToolRouter` nuevos, así que cada
+  pedido queda aislado. En la CLI local (`main.py: run()`) no participa —
+  el audio va directo a `LocalAudioIO`.
+
+Una consecuencia real de este diseño: el mu-law 8kHz de la telefonía corta
+todo lo que esté por encima de ~4kHz, así que el modelo entiende peor
+nombres/direcciones/teléfonos en una llamada real que en local — por eso
+el `SYSTEM_PROMPT` obliga a repetir esos datos en voz alta antes de
+guardarlos. Y cuando la sesión de Gemini termina (el modelo cuelga, o el
+watchdog de inactividad corta), `server.py` cierra el WebSocket él mismo —
+si no, Twilio no tiene forma de saber que debe colgar la llamada real.
 
 ## Instalación
 
@@ -157,38 +158,15 @@ Habla como si llamaras a la pizzería. Corta con `Ctrl+C`.
 ## Telefonía real (Twilio)
 
 Recibe llamadas de verdad en tu móvil y las conecta con Gemini, sin tocar
-nada de `domain/` ni `agents/` — solo cambia de dónde sale/entra el audio.
+nada de `domain/` ni `agents/` — solo cambia de dónde sale/entra el audio
+(ver [Arquitectura](#arquitectura)).
 
-### 0. Seguridad: validar que las peticiones vienen de Twilio
-
-Los dos endpoints (`/voice/incoming` y `/media-stream`) comprueban la
-cabecera `X-Twilio-Signature` en cada petición — sin esto, cualquiera que
-encontrara tu URL pública de ngrok podría simular llamadas falsas y gastar
-tu cuota de la API de Gemini. Necesitas tu **Twilio Auth Token** (consola
-de Twilio → Account → Auth Token) en `.env`:
-
-```bash
-TWILIO_AUTH_TOKEN=tu_auth_token_aqui
-```
-
-El servidor rechaza con `403` cualquier petición sin firma válida, y ni
-siquiera arranca si falta el Auth Token en `.env`.
-
-> ⚠️ **Con devtunnel** (y a veces con ngrok): el túnel puede reescribir la
-> cabecera `Host` que le llega a tu app a algo interno (`localhost:8000`)
-> en vez del dominio público real, aunque sí reenvía el dominio público en
-> `X-Forwarded-Host`. Si ves `403` rechazando peticiones que sabes que son
-> de Twilio de verdad (IP de Twilio en el log), es esto — el servidor ya
-> usa `X-Forwarded-Host` cuando está presente (`server.py: _public_host`),
-> pero si algún día cambias de túnel y vuelve a fallar, es lo primero que
-> hay que revisar (los logs de `403` en `voice_incoming`/`media_stream`
-> imprimen `host_header` y `x-forwarded-host` para diagnosticarlo).
->
-> Además, para el **handshake del WebSocket** específicamente (no para el
-> webhook POST), Twilio a veces firma la URL con una barra final `/` aunque
-> la URL real (la del TwiML) no la lleve — es una inconsistencia conocida
-> y documentada por el propio Twilio, no un bug nuestro. `media_stream`
-> ya prueba la firma con y sin barra final antes de rechazar.
+**Seguridad:** los dos endpoints (`/voice/incoming` y `/media-stream`)
+validan la cabecera `X-Twilio-Signature` antes de procesar nada — sin
+esto, cualquiera que encontrara tu URL pública podría simular llamadas
+falsas y gastar tu cuota de Gemini. El servidor rechaza con `403`
+cualquier petición sin firma válida, y ni siquiera arranca si falta
+`TWILIO_AUTH_TOKEN` en `.env` (consola de Twilio → Account → Auth Token).
 
 ### 1. Arrancar el servidor
 
@@ -199,153 +177,57 @@ uvicorn pizzeria_bot.server:app --host 0.0.0.0 --port 8000
 
 ### 2. Exponerlo a internet
 
-Twilio necesita una URL pública (HTTPS) para llamar a tu servidor local.
-Esto es una herramienta de sistema, fuera del proyecto — no toca
-`pyproject.toml` ni el venv. Dos opciones:
-
-#### Opción A: devtunnel (Microsoft, recomendado en Windows)
-
-Binario firmado por Microsoft — sin sorpresas con el antivirus.
-
-```powershell
-winget install Microsoft.devtunnel
-```
-> Tras instalar, **reinicia VS Code entero** (no solo la pestaña de
-> terminal) — el PATH nuevo lo recoge un proceso de VS Code recién
-> arrancado, no una terminal nueva dentro del mismo VS Code ya abierto.
-> Mientras tanto, usa la ruta completa: busca `devtunnel.exe` dentro de
-> `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Microsoft.devtunnel_...`.
+Twilio necesita una URL pública HTTPS. Con
+[devtunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/) (Windows, sin sorpresas de antivirus):
 
 ```bash
-devtunnel user login          # una vez, abre el navegador para iniciar sesión
+devtunnel user login          # una vez
+devtunnel host -p 8000 --allow-anonymous
 ```
 
-**Importante**: `devtunnel host -p 8000 --allow-anonymous` (sin más) crea un
-túnel nuevo con URL aleatoria **cada vez que lo arrancas** — significa
-volver a actualizar el webhook en Twilio cada sesión. Para evitarlo, crea un
-túnel con nombre fijo **una sola vez**:
+O con [ngrok](https://ngrok.com/) (cross-platform, cuenta gratuita):
 
 ```bash
-devtunnel create pizzai --allow-anonymous
-devtunnel port create pizzai -p 8000
-```
-
-Y a partir de ahí, arráncalo siempre así (misma URL pública todas las
-veces, no hace falta tocar Twilio de nuevo):
-
-```bash
-devtunnel host pizzai
-```
-
-Te da una URL pública fija tipo `https://xxxxx-8000.<region>.devtunnels.ms`
-(el `xxxxx` es un identificador aparte del nombre del túnel, pero se
-mantiene estable mientras reutilices `devtunnel host pizzai`).
-
-#### Opción B: ngrok
-
-```powershell
-winget install ngrok.ngrok
-```
-> Mismo aviso de reiniciar VS Code entero que con devtunnel.
->
-> **Ojo**: el paquete de winget puede instalar una versión antigua
-> (nos pasó: 3.3.1, insuficiente — ngrok pide ≥3.20.0). Actualízala con
-> `ngrok update`. Y el propio actualizador de ngrok puede activar un
-> falso positivo del antivirus (`Trojan:...!rfn`, detección heurística
-> por reputación, no una firma real) al reemplazar su propio `.exe` — si
-> te pasa, es tu decisión restaurarlo desde Windows Security o cambiar a
-> la opción A.
-
-Crea cuenta gratis en [dashboard.ngrok.com/signup](https://dashboard.ngrok.com/signup),
-copia tu token de [dashboard.ngrok.com/get-started/your-authtoken](https://dashboard.ngrok.com/get-started/your-authtoken):
-```bash
-ngrok config add-authtoken TU_TOKEN_AQUI   # una vez, antes de poder usar "ngrok http"
+ngrok config add-authtoken TU_TOKEN_AQUI   # una vez
 ngrok http 8000
 ```
 
-Sea cual sea la opción, copia la URL pública que te dé — cambia en cada
-ejecución si usas el plan gratuito, así que repite este paso cada vez que
-reinicies el túnel.
+Copia la URL pública que te dé cualquiera de los dos. Problemas de
+instalación, versión, antivirus o túneles reescribiendo cabeceras →
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ### 3. Configurar el número en Twilio
 
-En la [consola de Twilio](https://console.twilio.com/):
-
-1. **Phone Numbers → Manage → Active numbers** → tu número de prueba.
-2. En **Voice Configuration → A call comes in**, selecciona "Webhook" y
-   pon tu URL pública + `/voice/incoming` (ej.
-   `https://xxxx-xxxx.ngrok-free.app/voice/incoming` o
-   `https://xxxxx-8000.<region>.devtunnels.ms/voice/incoming`), método `HTTP POST`.
-3. Guarda.
+En la [consola de Twilio](https://console.twilio.com/) → **Phone Numbers
+→ Manage → Active numbers** → tu número → **Voice Configuration → A call
+comes in** → Webhook: tu URL pública + `/voice/incoming`, método
+`HTTP POST` → Guardar.
 
 ### 4. Probar
 
-**Opción A — llamas tú al número de Twilio.** Con una cuenta **trial**, solo
-puedes llamar desde números verificados en la consola de Twilio (normalmente
-tu propio móvil) — es configuración de la cuenta, no hay nada que tocar en
-el código para eso.
+**Llamas tú al número de Twilio** — con cuenta trial, solo desde números
+verificados en la consola (normalmente tu propio móvil).
 
-> ⚠️ Si tu número de Twilio no es del mismo país que tu móvil, esto puede
-> ser una llamada **internacional** para tu operadora — revisa la tarifa
-> antes de llamar. Con un operador español normal, llamar a un número de
-> EE.UU. puede costar varios euros por minuto (no es un coste de Twilio,
-> es de tu propia operadora).
+> ⚠️ Si tu número de Twilio no es de tu país, esto puede ser una llamada
+> **internacional** para tu operadora — revisa la tarifa antes de llamar.
 
-**Opción B — que te llame Twilio a ti (recomendado, más barato).** En vez de
-marcar tú, dispara la llamada con `pizzai-call`:
+**O que te llame Twilio a ti** (recomendado, más barato — necesita
+`TWILIO_ACCOUNT_SID` y `TWILIO_PHONE_NUMBER` en `.env`):
 
 ```bash
-pizzai-call +34TU_NUMERO https://xxxxx-8000.<region>.devtunnels.ms
+pizzai-call +34TU_NUMERO https://tu-url-publica
 ```
 
-Necesitas `TWILIO_ACCOUNT_SID` y `TWILIO_PHONE_NUMBER` en `.env` (ver
-`.env.example`). El coste corre por tu saldo de Twilio, no por tu operadora
-— por ejemplo, llamar a un móvil español cuesta unos **$0.0486/minuto**
-([tarifas oficiales de Twilio](https://www.twilio.com/en-us/voice/pricing/es)),
-y recibir la llamada en tu móvil es gratis, como cualquier llamada entrante.
+> ⚠️ El coste corre por tu saldo de Twilio, no por tu operadora: unos
+> **$0.0486/minuto** a un móvil español
+> ([tarifas oficiales](https://www.twilio.com/en-us/voice/pricing/es)).
+> Recibir la llamada en tu móvil es gratis. Si Twilio rechaza la llamada
+> por permisos internacionales (error 21215), la solución está en
+> [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
-> ⚠️ La primera vez, Twilio puede rechazar la llamada con
-> `Account not authorized to call +34... - Perhaps you need to enable some
-> international permissions` (error 21215). Es un permiso de cuenta, no un
-> bug: por defecto las cuentas nuevas no tienen habilitados todos los
-> países para llamadas salientes (protección antifraude). Actívalo en
-> [Geo Permissions](https://www.twilio.com/console/voice/calls/geo-permissions/low-risk)
-> → busca tu país (España está en "Western Europe") → actívalo → guarda.
-
-Con cualquiera de las dos opciones, verás en los logs del servidor cada
-llamada entrante, con el mismo formato de log (`Modelo: ...`, `Usuario: ...`,
-`tool_call ...`) que en modo local — es literalmente la misma
-`PizzeriaCallSession` por debajo.
-
-> Nota técnica: Twilio Media Streams manda audio mu-law mono a 8kHz: el
-> `TwilioAudioIO` (`audio/twilio_io.py`) lo convierte a PCM16 16kHz para
-> Gemini de entrada, y de PCM16 24kHz a mu-law 8kHz de vuelta para Twilio
-> (`audio/codecs.py`, usando `audioop.ratecv` para el resampling — sin
-> numpy/scipy).
->
-> Esto tiene una consecuencia real: el mu-law 8kHz es el códec clásico de
-> telefonía, pensado para voz inteligible, no para claridad — corta todo lo
-> que esté por encima de ~4kHz. Es objetivamente peor que el PCM 16kHz sin
-> comprimir de unas pruebas locales con micrófono, y hace que el modelo
-> entienda peor datos concretos (nombres, direcciones, números de teléfono)
-> en una llamada real que en local — no es un problema de latencia/ping,
-> es la calidad del audio de la red telefónica en sí, algo inherente a
-> cualquier bot de voz sobre PSTN. El `SYSTEM_PROMPT` (`agents/prompts.py`)
-> mitiga esto pidiéndole al modelo que repita en voz alta el nombre, la
-> dirección y el teléfono (dígito a dígito) nada más recogerlos, para que
-> el cliente pueda corregir un error de transcripción antes de que llegue
-> al resumen final.
-
-> Nota técnica: cuando el modelo llama a `finalizar_llamada` (o el
-> watchdog de inactividad corta la sesión), `run_with_reconnect` termina
-> por su cuenta, pero eso no basta para colgar la llamada real — el
-> WebSocket de Twilio sigue abierto hasta que alguien lo cierra. El bucle
-> de `media_stream` (`server.py`) vigila `call_task` con `asyncio.wait`
-> además de los eventos entrantes de Twilio, y en cuanto la sesión de
-> Gemini termina, cierra el WebSocket él mismo: con `<Connect><Stream>` y
-> nada después en el TwiML, cerrar el socket es la señal que hace que
-> Twilio cuelgue la llamada de verdad, en vez de dejarla conectada en
-> silencio hasta que el cliente cuelgue a mano.
+Verás en los logs del servidor cada llamada entrante con el mismo formato
+(`Modelo: ...`, `Usuario: ...`, `tool_call ...`) que en modo local — es
+literalmente la misma `PizzeriaCallSession` por debajo.
 
 ## Tests
 

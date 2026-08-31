@@ -102,9 +102,12 @@ FIJAR_TIPO_ENTREGA = {
 
 FIJAR_DATOS_CLIENTE = {
     "name": "fijar_datos_cliente",
-    "description": "Guarda nombre, dirección y/o el teléfono de contacto del cliente. Llama a "
-    "esta función en cuanto tengas CUALQUIERA de esos datos, no esperes a tener todos — así no "
-    "se pierde lo que el cliente ya dio si la llamada se corta antes de completar el resto. "
+    "description": "Guarda nombre, dirección y/o el teléfono de contacto del cliente. Si el dato "
+    "estaba claro y no pediste confirmación, guárdalo en cuanto lo oigas. Si sí pediste que lo "
+    "confirmara (dato ambiguo, o el teléfono, que siempre se confirma), espera a un 'sí' real "
+    "antes de llamar a esta función — repetirlo en voz alta no es lo mismo que confirmado. Llama "
+    "a esta función en cuanto tengas CUALQUIERA de esos datos listo, no esperes a tener todos — "
+    "así no se pierde lo que el cliente ya dio si la llamada se corta antes de completar el resto. "
     "El nombre se pide siempre, sea recogida o domicilio. Si es a domicilio, pide además la "
     "dirección. El teléfono se pide siempre al final, independientemente del tipo de entrega.",
     "parameters": {

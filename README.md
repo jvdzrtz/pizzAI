@@ -81,22 +81,16 @@ si no, Twilio no tiene forma de saber que debe colgar la llamada real.
 
 ## Instalación
 
-### Requisito: PortAudio
+### Requisito: PortAudio (solo Windows, solo para la CLI local)
 
-`pyaudio` necesita la librería del sistema PortAudio.
+La CLI local (`pizzai`, micro/altavoz) usa PyAudioWPatch, que es
+Windows-only — hoy no hay una vía multiplataforma para este modo. En
+Windows no necesitas hacer nada aparte, `pip` trae un wheel con PortAudio
+ya incluido.
 
-**Windows** — no necesitas hacer nada aparte, `pip` te trae un wheel
-precompilado con PortAudio ya incluido.
-
-**macOS**
-```bash
-brew install portaudio
-```
-
-**Linux (Debian/Ubuntu)**
-```bash
-sudo apt-get install portaudio19-dev
-```
+En Mac/Linux no hace falta instalar PortAudio: el servidor de telefonía
+real (`server.py`, vía Twilio) y los tests no dependen de ningún
+micrófono/altavoz local, así que corren igual sin él.
 
 ### Instalar el proyecto
 
@@ -138,9 +132,9 @@ cp .env.example .env
 # edita .env y pon tu GEMINI_API_KEY
 ```
 
-Si quieres forzar un micro/altavoz concreto (`INPUT_DEVICE_NAME`,
-`OUTPUT_DEVICE_NAME` en `.env`), primero mira qué nombre exacto usa tu
-sistema:
+Si vas a usar la CLI local en Windows y quieres forzar un micro/altavoz
+concreto (`INPUT_DEVICE_NAME`, `OUTPUT_DEVICE_NAME` en `.env`), primero
+mira qué nombre exacto usa tu sistema:
 ```bash
 python scripts/list_audio_devices.py
 ```

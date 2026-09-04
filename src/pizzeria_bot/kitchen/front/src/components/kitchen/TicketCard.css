@@ -1,0 +1,122 @@
+.ticket {
+  --giro: 0deg;
+  width: 260px;
+  background: var(--papel);
+  color: var(--texto-papel);
+  padding: 16px 16px 18px;
+  border-radius: 2px;
+  box-shadow:
+    0 10px 18px var(--papel-sombra),
+    0 1px 0 rgba(255, 255, 255, 0.4) inset;
+  transform: rotate(var(--giro));
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  position: relative;
+  animation: colocar 0.55s cubic-bezier(0.25, 0.1, 0.25, 1) both;
+}
+
+/* Dentro de la impresora: sin chincheta, sin la animación de caída (la
+   entrada la controla el propio componente Printer). */
+.ticket--estatico {
+  animation: none;
+  box-shadow: none;
+}
+.ticket--estatico::before {
+  content: none;
+}
+
+.ticket::before {
+  /* la "chincheta" que sujeta el ticket a la línea */
+  content: '';
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #e8887a, var(--acento) 70%);
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.4);
+}
+
+@keyframes colocar {
+  0% {
+    opacity: 0;
+    transform: translateY(-90px) rotate(-8deg) scale(0.92);
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(4px) rotate(calc(var(--giro) - 3deg)) scale(1.05);
+  }
+  75% {
+    transform: translateY(-4px) rotate(calc(var(--giro) + 1.5deg)) scale(0.98);
+  }
+  90% {
+    transform: translateY(1px) rotate(var(--giro)) scale(1.01);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) rotate(var(--giro)) scale(1);
+  }
+}
+
+.ticket-cabecera {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px dashed #b8ac8c;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+}
+.ticket-hora {
+  font-weight: 700;
+}
+.badge {
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 3px;
+  color: #fff;
+  background: var(--acento);
+}
+.badge.recogida {
+  background: #6b5a3f;
+}
+
+.items {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+.items li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.items li + li {
+  margin-top: 3px;
+}
+
+.ticket-cliente {
+  border-top: 1px dashed #b8ac8c;
+  padding-top: 8px;
+  margin-top: 4px;
+}
+.ticket-cliente div + div {
+  margin-top: 2px;
+}
+.ticket-cliente .etiqueta {
+  color: #8a7f63;
+  font-size: 11px;
+}
+
+.ticket-total {
+  margin-top: 10px;
+  text-align: right;
+  font-weight: 700;
+  font-size: 14px;
+}

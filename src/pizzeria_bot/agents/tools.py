@@ -8,6 +8,7 @@ import logging
 
 from pizzeria_bot.domain.menu import menu_as_dict
 from pizzeria_bot.domain.order import Order, OrderError
+from pizzeria_bot.kitchen.store import store as kitchen_store
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +250,7 @@ class ToolRouter:
     def _confirmar_pedido(self) -> dict:
         resumen = self.order.confirmar()
         logger.info("PEDIDO CONFIRMADO: %s", resumen)
+        kitchen_store.anadir_ticket(resumen)
         return {"ok": True, "resumen": resumen}
 
     def _finalizar_llamada(self) -> dict:

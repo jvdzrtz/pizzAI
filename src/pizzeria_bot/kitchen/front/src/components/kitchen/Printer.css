@@ -1,0 +1,126 @@
+.impresora {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.impresora-cuerpo {
+  position: relative;
+  width: 160px;
+  height: 82px;
+  background: linear-gradient(180deg, #3c372f 0%, #322e28 55%, #221f19 100%);
+  border-radius: 10px 10px 5px 5px;
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: box-shadow 0.25s ease;
+}
+.impresora-cuerpo.imprimiendo {
+  box-shadow:
+    0 6px 22px rgba(193, 64, 31, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  animation: vibrar 0.15s linear infinite;
+}
+
+@keyframes vibrar {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-0.6px);
+  }
+  75% {
+    transform: translateX(0.6px);
+  }
+}
+
+.impresora-etiqueta {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  width: 46px;
+  height: 8px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.impresora-luz {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #5a4632;
+  transition: background 0.15s ease;
+}
+.impresora-cuerpo.imprimiendo .impresora-luz {
+  animation: parpadeo 0.28s steps(1, end) infinite;
+}
+
+@keyframes parpadeo {
+  0%,
+  100% {
+    background: var(--acento);
+    box-shadow: 0 0 8px var(--acento);
+  }
+  50% {
+    background: #7a2c15;
+    box-shadow: none;
+  }
+}
+
+/* La bandeja: el papel pasa "por debajo" de este labio, para que se lea
+   como que sale de una ranura real y no que aparece flotando bajo la caja. */
+.impresora-bandeja {
+  position: relative;
+  width: 132px;
+  height: 14px;
+  margin-top: -6px;
+  background: linear-gradient(180deg, #1c1a15, #100f0c);
+  border-radius: 0 0 5px 5px;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.5);
+  z-index: 2;
+}
+
+.impresora-ranura {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 108px;
+  height: 5px;
+  border-radius: 3px;
+  background: #050403;
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.8);
+}
+
+.impresora-papel {
+  overflow: hidden;
+  width: 260px;
+  margin-top: -3px;
+  transition-property: height;
+  /* Velocidad constante, no un "ease-out" que frena de golpe al final -
+     así se lee como el motor de rodillos empujando el papel a ritmo
+     fijo, en vez de un movimiento suave tipo UI. */
+  transition-timing-function: linear;
+}
+
+/* Textura mecánica: un pequeño temblor lateral mientras el papel sale,
+   para que no se lea como una caja creciendo suavemente sino como algo
+   siendo empujado por rodillos. */
+.impresora-papel.saliendo > div {
+  animation: temblor 0.09s linear infinite;
+}
+
+@keyframes temblor {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(0.8px);
+  }
+}

@@ -5,10 +5,12 @@ de pago, zona de reparto y normas usando solo el contenido real de los
 documentos que suba el dueño del restaurante — nunca inventa una política
 que no esté en esos documentos.
 
-No está conectado al agente de voz (`agents/tools.py`), a `server.py` ni
-a Twilio todavía — eso es un paso posterior, deliberadamente fuera del
-alcance de este módulo. El menú y los alérgenos tampoco pasan por aquí:
-van con lógica determinista aparte.
+No está conectado al agente de voz (`agents/tools.py`) ni a Twilio — eso
+sigue deliberadamente fuera del alcance de este módulo. Sí está conectado
+a `server.py` (endpoint `POST /faq/preguntar`) y al chatbot de la
+pantalla de cocina (`kitchen/front/`, columna derecha) — ver más abajo.
+El menú y los alérgenos tampoco pasan por aquí: van con lógica
+determinista aparte.
 
 ## Instalar
 
@@ -110,11 +112,24 @@ Dos grupos:
   testear el cableado de la cadena con dobles deterministas, sin
   necesitar credenciales para esa parte.
 
+## Endpoint HTTP y chatbot
+
+`server.py` expone `POST /faq/preguntar` (`{"pregunta": "..."}` →
+`{"respuesta": "..."}`), sin firma de Twilio ni autenticación — igual
+que `/kitchen`, es una herramienta interna para el propio local, no algo
+que llame Twilio. Declarado como `def` normal (no `async def`) a
+propósito: `responder_faq()` hace llamadas de red bloqueantes
+(embeddings + LLM), así que FastAPI lo ejecuta en su threadpool en vez
+del event loop, sin bloquear las llamadas de voz ni la pantalla de
+cocina mientras responde. Tests en `tests/test_faq_endpoint.py`
+(`responder_faq` mockeado, sin llamadas reales a la API).
+
+El chatbot de `kitchen/front/` (componente `ChatFAQ`, widget flotante de
+la pantalla de cocina) llama a este endpoint por una URL relativa
+(`/faq/preguntar`), proxeada en desarrollo en `vite.config.ts` igual que
+el WebSocket de `/kitchen/ws`.
+
 ## Pendiente (fuera de alcance de este módulo)
 
-- Añadir `.chroma/` al `.gitignore` de la raíz del proyecto — no lo he
-  tocado porque la tarea decía explícitamente "no toques ningún fichero
-  existente" salvo `pyproject.toml`, pero sin esa línea, `.chroma/`
-  (una base SQLite de Chroma) puede acabar commiteada por accidente.
-- Conectar `responder_faq()` al agente de voz y/o a un endpoint HTTP —
+- Conectar `responder_faq()` al agente de voz (por teléfono) — sigue
   deliberadamente fuera de esta tarea.

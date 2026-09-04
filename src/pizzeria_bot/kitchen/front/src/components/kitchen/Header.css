@@ -1,0 +1,37 @@
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 28px;
+  background: var(--fondo-panel);
+  border-bottom: 3px solid var(--acento);
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.3rem;
+  letter-spacing: 0.02em;
+  color: var(--papel);
+}
+header h1 span {
+  color: var(--acento);
+}
+
+.estado {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--acento-suave);
+}
+.punto {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #8a1f1f;
+  transition: background 0.3s ease;
+}
+.punto.conectado {
+  background: var(--verde);
+  box-shadow: 0 0 8px var(--verde);
+}

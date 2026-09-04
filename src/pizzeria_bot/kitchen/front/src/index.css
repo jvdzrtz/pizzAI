@@ -1,0 +1,60 @@
+:root {
+  --fondo: #1b1a17;
+  --fondo-panel: #242220;
+  --papel: #faf6ec;
+  --papel-sombra: rgba(0, 0, 0, 0.35);
+  --texto-papel: #241f16;
+  --acento: #c1401f;
+  --acento-suave: #e8caa8;
+  --verde: #4caf7d;
+  --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  --sans: -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--fondo);
+  color: var(--acento-suave);
+  font-family: var(--sans);
+}
+
+/* Layout de página completa: cabecera + main se reparten los 100vh, y
+   dentro de main el corcho (ver TicketRail.css) se estira con flex:1
+   hasta el final, aunque haya pocos o ningún ticket. */
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* Fila, no columna: la impresora vive en su propia columna a la
+   izquierda, separada del corcho. Así, cuando el papel va saliendo
+   (Printer.tsx anima su altura), solo crece dentro de su propia
+   columna - el corcho de al lado ni se entera, no se desplaza. */
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 28px;
+  padding: 28px;
+  /* Impresora + corcho a 4 columnas. El chat (ChatFAQ) no cuenta aquí:
+     es un widget flotante con position:fixed, fuera de este layout. */
+  max-width: 1560px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.columna-impresora {
+  flex: 0 0 180px;
+  display: flex;
+  flex-direction: column;
+  /* flex-start, no center: pegada al borde izquierdo de su columna, no
+     centrada dentro de ella. */
+  align-items: flex-start;
+}

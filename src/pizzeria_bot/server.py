@@ -18,19 +18,27 @@ import json
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import Response
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
 from google import genai
+from pydantic import BaseModel
 from twilio.request_validator import RequestValidator
 
 from pizzeria_bot.agents.tools import ToolRouter
 from pizzeria_bot.audio.twilio_io import TwilioAudioIO
 from pizzeria_bot.config import require_gemini_api_key, require_twilio_auth_token, settings
+from pizzeria_bot.kitchen.store import store as kitchen_store
 from pizzeria_bot.logging_config import setup_logging
 from pizzeria_bot.main import run_with_reconnect
+from pizzeria_bot.rag.faq_chain import responder_faq
 
 logger = logging.getLogger(__name__)
+
+_KITCHEN_STATIC_DIR = Path(__file__).resolve().parent / "kitchen" / "static"
+_KITCHEN_HTML = _KITCHEN_STATIC_DIR / "index.html"
 
 
 @asynccontextmanager
@@ -44,6 +52,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(lifespan=lifespan)
+
+# El build de React (front/, ver front/vite.config.ts) escribe aquí:
+# index.html se sirve aparte en /kitchen (más abajo, como HTMLResponse
+# igual que antes), pero el JS/CSS generado necesita servirse como
+# archivos estáticos normales en las rutas que el propio index.html
+# referencia (/assets/...).
+app.mount("/assets", StaticFiles(directory=_KITCHEN_STATIC_DIR / "assets"), name="kitchen-assets")
 
 
 def _public_host(headers: Mapping[str, str]) -> str:
@@ -195,3 +210,78 @@ async def media_stream(websocket: WebSocket) -> None:
             await call_task
         with contextlib.suppress(Exception):
             await websocket.close()
+
+
+@app.get("/kitchen")
+async def kitchen_page() -> HTMLResponse:
+    """Pantalla de cocina: un ticket aparece aquí en cuanto se confirma un
+    pedido (ver kitchen/store.py y agents/tools.py: _confirmar_pedido).
+
+    A propósito SIN validación de firma de Twilio - este endpoint no lo
+    llama Twilio, lo abre el propio pizzero en un navegador/tablet. Nota
+    de seguridad real: no tiene ninguna autenticación tampoco, así que si
+    el servidor está expuesto por un túnel público, cualquiera con la URL
+    puede ver los pedidos confirmados (nombre, dirección, teléfono). Vale
+    para desarrollo/demo; en un despliegue real haría falta protegerlo
+    (red privada, o un token compartido)."""
+    return HTMLResponse(_KITCHEN_HTML.read_text(encoding="utf-8"))
+
+
+@app.websocket("/kitchen/ws")
+async def kitchen_ws(websocket: WebSocket) -> None:
+    """Canal en vivo para la pantalla de cocina: al conectar manda el
+    snapshot de tickets ya confirmados, y luego cada ticket nuevo en
+    cuanto se confirma un pedido. Puede haber varias pantallas conectadas
+    a la vez (kitchen_store.registrar_cliente admite varios clientes)."""
+    await websocket.accept()
+    kitchen_store.registrar_cliente(websocket)
+    try:
+        await websocket.send_json(
+            {
+                "event": "snapshot",
+                "tickets": [t.model_dump(mode="json") for t in kitchen_store.snapshot()],
+            }
+        )
+        while True:
+            # No esperamos nada del cliente - esto solo mantiene la
+            # conexión abierta para poder detectar cuando se cierra.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        kitchen_store.desregistrar_cliente(websocket)
+
+
+class PreguntaFAQ(BaseModel):
+    pregunta: str
+
+
+class RespuestaFAQ(BaseModel):
+    respuesta: str
+
+
+@app.post("/faq/preguntar")
+def faq_preguntar(cuerpo: PreguntaFAQ) -> RespuestaFAQ:
+    """Chatbot de políticas/FAQ del restaurante (rag/) para la pantalla de
+    cocina - horarios, métodos de pago, zona de reparto, normas. Igual que
+    /kitchen, sin firma de Twilio: es una herramienta interna, no algo que
+    llame Twilio.
+
+    Función SÍNCRONA a propósito: responder_faq() hace llamadas de red que
+    bloquean (embeddings + LLM de Gemini) - al declarar el endpoint como
+    `def` normal (no `async def`), FastAPI la ejecuta en su threadpool en
+    vez de en el event loop, así una pregunta lenta no bloquea las
+    llamadas de voz ni la pantalla de cocina mientras se responde."""
+    pregunta = cuerpo.pregunta.strip()
+    if not pregunta:
+        raise HTTPException(status_code=400, detail="La pregunta no puede estar vacía.")
+
+    try:
+        respuesta = responder_faq(pregunta)
+    except Exception:
+        logger.exception("Error respondiendo pregunta de FAQ: %r", pregunta)
+        raise HTTPException(
+            status_code=502, detail="No se pudo generar una respuesta ahora mismo."
+        ) from None
+
+    return RespuestaFAQ(respuesta=respuesta)

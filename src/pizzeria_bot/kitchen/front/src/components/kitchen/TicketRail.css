@@ -1,0 +1,43 @@
+.corcho {
+  flex: 1;
+  padding: 32px;
+  border-radius: 6px;
+  background-color: #a9805a;
+  /* Textura de corcho generada con un filtro SVG de ruido (feTurbulence),
+   * sin depender de ninguna imagen externa - codificado con un encoder de
+   * verdad (Python urllib.parse.quote), no a mano - un solo carácter mal
+   * escapado ahí basta para que el navegador descarte el data URI entero
+   * y se quede solo con el color de fondo, en silencio y sin error visible. */
+  background-image: url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22220%22%20height%3D%22220%22%3E%3Cfilter%20id%3D%22n%22%3E%3CfeTurbulence%20type%3D%22fractalNoise%22%20baseFrequency%3D%220.9%22%20numOctaves%3D%223%22%20seed%3D%2211%22%20stitchTiles%3D%22stitch%22/%3E%3CfeColorMatrix%20type%3D%22matrix%22%20values%3D%220%200%200%200%200.22%20%200%200%200%200%200.13%20%200%200%200%200%200.06%20%200%200%200%201%200%22/%3E%3C/filter%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20filter%3D%22url%28%23n%29%22/%3E%3C/svg%3E');
+  background-size: 220px 220px;
+  border: 10px solid #6b4a2f;
+  box-shadow:
+    inset 0 0 40px rgba(0, 0, 0, 0.35),
+    0 8px 20px rgba(0, 0, 0, 0.4);
+}
+
+.rail-vacio {
+  margin: 40px 0 0;
+  text-align: center;
+  color: #3c2c1c;
+  font-size: 1.05rem;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* Grid, no flex: cada ticket cae en una celda fija (fila/columna por
+   orden de llegada) que no depende de cuántos tickets haya alrededor -
+   a diferencia de flex-wrap, añadir un ticket nuevo nunca reposiciona
+   los que ya estaban. auto-fill calcula cuántas columnas de 260px caben
+   sin depender del número de tickets, y max-width lo tope en 4 aunque
+   el corcho tenga sitio de sobra para una quinta. */
+.rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 260px);
+  gap: 26px;
+  max-width: calc(4 * 260px + 3 * 26px);
+  /* Sin esto, el grid estira cada ticket (align-items: stretch es el
+     valor por defecto) a la altura de la fila, que marca el más alto -
+     así un pedido corto se "redimensiona" en cuanto aparece a su lado
+     uno más largo. Con "start" cada ticket conserva su alto natural. */
+  align-items: start;
+}

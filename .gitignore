@@ -9,3 +9,12 @@ build/
 .pytest_cache/
 .ruff_cache/
 .chroma/
+
+# Config local de Claude Code (launch.json de servidores de preview) -
+# tooling personal, no parte de la app.
+.claude/
+
+# Build de kitchen/front/ (ver vite.config.ts: outDir apunta aquí, fuera
+# de front/ - su propio .gitignore no llega a cubrir esta carpeta
+# hermana). Se regenera con `npm run build` (ver kitchen/front/README.md).
+src/pizzeria_bot/kitchen/static/

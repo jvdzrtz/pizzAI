@@ -32,6 +32,17 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
 ]
+# RAG de FAQ/políticas del restaurante (rag/). Módulo aislado: no lo usa
+# ni server.py ni agents/tools.py todavía, por eso no está en las
+# dependencias base - así el bot de voz sigue instalándose sin arrastrar
+# todo LangChain si no hace falta.
+rag = [
+    "langchain>=0.3",
+    "langchain-community>=0.3",
+    "langchain-google-genai>=2.0",
+    "langchain-chroma>=0.2",
+    "pypdf>=5.0",
+]
 
 [project.scripts]
 pizzai = "pizzeria_bot.main:run"

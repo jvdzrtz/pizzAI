@@ -23,6 +23,12 @@ export default defineConfig({
       '/faq': {
         target: 'http://127.0.0.1:8000',
       },
+      // Igual, para el GET del panel de incidencias (ver server.py:
+      // /incidencias/pendientes, que llama a
+      // agents/complaint_graph.listar_incidencias_pendientes).
+      '/incidencias': {
+        target: 'http://127.0.0.1:8000',
+      },
     },
   },
 })

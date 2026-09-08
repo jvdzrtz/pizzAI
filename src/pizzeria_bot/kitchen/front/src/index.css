@@ -43,9 +43,10 @@ main {
   align-items: stretch;
   gap: 28px;
   padding: 28px;
-  /* Impresora + corcho a 4 columnas. El chat (ChatFAQ) no cuenta aquí:
-     es un widget flotante con position:fixed, fuera de este layout. */
-  max-width: 1560px;
+  /* Impresora + corcho a 4 columnas + panel de incidencias. El chat
+     (ChatFAQ) no cuenta aquí: es un widget flotante con position:fixed,
+     fuera de este layout. */
+  max-width: 1860px;
   width: 100%;
   margin: 0 auto;
 }
@@ -57,4 +58,8 @@ main {
   /* flex-start, no center: pegada al borde izquierdo de su columna, no
      centrada dentro de ella. */
   align-items: flex-start;
+}
+
+.panel-incidencias {
+  flex: 0 0 300px;
 }

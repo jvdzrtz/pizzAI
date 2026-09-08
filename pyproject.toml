@@ -43,6 +43,15 @@ rag = [
     "langchain-chroma>=0.2",
     "pypdf>=5.0",
 ]
+# Agente de incidencias/quejas (agents/complaint_graph.py): grafo LangGraph
+# que reutiliza responder_faq() de rag/ para consultar políticas reales.
+# Necesita el extra "rag" instalado también (pip install -e ".[rag,complaints]")
+# - no se duplica aquí a propósito. Import perezoso en tools.py/complaint_graph.py:
+# el bot de voz base sigue sin arrastrar ninguno de los dos extras si no se usa
+# la tool gestionar_queja.
+complaints = [
+    "langgraph>=0.2",
+]
 
 [project.scripts]
 pizzai = "pizzeria_bot.main:run"

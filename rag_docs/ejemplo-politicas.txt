@@ -123,6 +123,14 @@ incidencias con pedidos a domicilio, puedes contactar por teléfono o a
 través del formulario de contacto de la web dentro de las 24 horas
 siguientes a la entrega.
 
+Política de compensación por incidencias
+Si un pedido llega con más de 45 minutos de retraso sobre el tiempo
+estimado, o llega en mal estado (frío, incompleto), se ofrece un
+descuento del 10% en el próximo pedido. Si el cliente reporta un
+problema de seguridad alimentaria, un error de cobro superior a 15€, o
+se muestra muy alterado, la incidencia debe derivarse siempre a un
+responsable humano, sin ofrecer compensación automática.
+
 Wifi y espacios de trabajo
 Disponemos de wifi gratuito para clientes. No disponemos de enchufes en
 todas las mesas, así que si necesitas trabajar con el portátil te

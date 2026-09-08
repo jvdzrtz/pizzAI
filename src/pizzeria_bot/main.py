@@ -17,6 +17,10 @@ MAX_RECONNECT_ATTEMPTS = 5
 RECONNECT_BACKOFF_SECONDS = 2
 IDLE_WATCHDOG_INTERVAL = 5.0
 
+# Tools que hacen llamadas de red reales (no puro Python en memoria como
+# las de domain/order.py) - ver _handle_tool_call.
+_TOOLS_LENTAS = {"gestionar_queja"}
+
 
 class CallEndedIntentionally(Exception):
     """Base para fines de llamada deliberados (no fallos de conexión) - no
@@ -44,6 +48,14 @@ class PizzeriaCallSession:
         self._out_queue: asyncio.Queue[bytes] = asyncio.Queue()
         self._last_user_activity = time.monotonic()
         self._idle_checkin_sent = False
+        # Se rellena cuando avisar_espera_incidencia tiene éxito, y se usa
+        # justo después (ver _receive_and_play) para empujar al modelo a
+        # llamar a gestionar_queja de verdad. Necesario porque, al
+        # contrario de lo esperado, el modelo NO continúa solo tras decir
+        # el mensaje de espera - simplemente se queda callado esperando
+        # input nuevo del cliente (visto en producción: se quedaba más de
+        # un minuto sin hacer nada hasta que el cliente volvía a hablar).
+        self._nudge_gestionar_queja: dict | None = None
 
     async def _listen_microphone(self) -> None:
         count = 0
@@ -73,14 +85,69 @@ class PizzeriaCallSession:
             )
 
     async def _handle_tool_call(self, tool_call) -> None:
+        # Gemini puede meter varias function calls en un mismo lote (mismo
+        # response.tool_call) - y como send_tool_response() solo se llama
+        # UNA VEZ al final, con TODAS las respuestas del lote juntas, el
+        # modelo nunca "oye" el resultado de la primera antes de que la
+        # segunda ya se haya ejecutado. Visto en producción: el modelo
+        # metía avisar_espera_incidencia + gestionar_queja en el mismo
+        # lote, así que el aviso de "dame un momento" y la resolución
+        # final le llegaban juntos, 10 segundos después de la queja - la
+        # tool de aviso quedaba completamente inútil (nunca se decía antes
+        # de la búsqueda real, que es justo para lo que existe). Se
+        # rechaza gestionar_queja si viene en el mismo lote que
+        # avisar_espera_incidencia, forzando dos rondas separadas: el
+        # modelo recibe el aviso solo, lo dice, y en su SIGUIENTE decisión
+        # (una function call nueva, no en este mismo lote) llama a
+        # gestionar_queja.
+        nombres_en_este_lote = {fc.name for fc in tool_call.function_calls}
         function_responses = []
         for fc in tool_call.function_calls:
             args = dict(fc.args or {})
-            result = self.tool_router.call(fc.name, args)
+            if fc.name == "gestionar_queja" and "avisar_espera_incidencia" in nombres_en_este_lote:
+                result = {
+                    "ok": False,
+                    "error": "Aún no has dicho el mensaje de avisar_espera_incidencia al "
+                    "cliente en voz alta - dilo primero, y llama a gestionar_queja "
+                    "después, en tu siguiente respuesta.",
+                }
+            elif fc.name in _TOOLS_LENTAS:
+                # gestionar_queja hace llamadas de red reales (RAG + LLM
+                # clasificador), varios segundos en total. Si se llama tal
+                # cual (síncrono), bloquea el event loop entero durante ese
+                # rato: se congelan el resto de tareas de esta misma sesión
+                # (mic, altavoz, el watchdog de silencio...), no solo esta
+                # tool call. Con to_thread corre en un hilo aparte y el loop
+                # sigue vivo mientras se espera la respuesta.
+                result = await asyncio.to_thread(self.tool_router.call, fc.name, args)
+            else:
+                result = self.tool_router.call(fc.name, args)
             logger.info("tool_call %s(%s) -> %s", fc.name, args, result)
+            if fc.name == "avisar_espera_incidencia" and result.get("ok"):
+                # Guarda los datos para empujar a gestionar_queja en cuanto
+                # el modelo termine de decir este mensaje (ver
+                # _receive_and_play) - no podemos hacerlo aquí mismo,
+                # mandar texto nuevo mientras el modelo aún no ha hablado
+                # el resultado de esta tool se leería como una
+                # interrupción, no como una continuación.
+                self._nudge_gestionar_queja = {
+                    "nombre_cliente": args.get("nombre_cliente", ""),
+                    "pedido": args.get("pedido", ""),
+                }
             function_responses.append(
                 types.FunctionResponse(id=fc.id, name=fc.name, response=result)
             )
+        # Reinicia el reloj de "cliente en silencio" aquí, no solo cuando
+        # habla: si no, el tiempo que tarda una tool lenta (gestionar_queja,
+        # varios segundos) cuenta como silencio del cliente aunque esté
+        # esperando pacientemente. Bug real visto en producción: al
+        # terminar la tool, nada_pendiente pasaba a True y el reloj ya
+        # llevaba acumulados esos segundos de proceso - el siguiente tick
+        # del watchdog (cada 5s) superaba enseguida idle_post_confirm_
+        # nudge_seconds y mandaba el aviso de "despídete" A MITAD de la
+        # propia despedida del modelo, cortándola en seco (se veía en los
+        # logs como un "barge-in" que en realidad no era del cliente).
+        self._last_user_activity = time.monotonic()
         await self.session.send_tool_response(function_responses=function_responses)
 
     async def _receive_and_play(self) -> None:
@@ -91,6 +158,19 @@ class PizzeriaCallSession:
         # el mic seguía mandando audio pero no se transcribía ni respondía nada.
         while True:
             async for response in self.session.receive():
+                # Cualquier cosa que llegue del modelo (audio, texto, una
+                # tool call) cuenta como "la conversación sigue viva ahora
+                # mismo" - reinicia el reloj de silencio aquí, no solo al
+                # final del turno. Motivo real: el audio de una respuesta
+                # puede seguir llegando varios segundos después de que la
+                # transcripción de texto ya esté completa (la síntesis de
+                # voz tarda su tiempo en transmitirse), así que el turno
+                # como tal no había "terminado" (el bucle async for seguía
+                # activo) cuando el watchdog comprobaba el reloj - y este
+                # seguía marcando el último reinicio de mucho antes (la
+                # tool call), disparando el aviso de "despídete" MIENTRAS
+                # el modelo aún estaba hablando y cortándolo a media frase.
+                self._last_user_activity = time.monotonic()
                 if response.data is not None:
                     await self.audio_io.write_chunk(response.data)
                 if response.tool_call:
@@ -114,8 +194,24 @@ class PizzeriaCallSession:
                     logger.info("Modelo: %s", content.output_transcription.text)
                 if content and content.input_transcription:
                     logger.info("Usuario: %s", content.input_transcription.text)
-                    self._last_user_activity = time.monotonic()
                     self._idle_checkin_sent = False
+            if self._nudge_gestionar_queja is not None:
+                # El turno donde el modelo dijo el mensaje de espera acaba
+                # de terminar - ahora sí toca empujarlo a llamar a
+                # gestionar_queja, con los mismos datos que ya usó en
+                # avisar_espera_incidencia (que le dé él la descripción,
+                # la tiene del resto de la conversación).
+                datos = self._nudge_gestionar_queja
+                self._nudge_gestionar_queja = None
+                await self.session.send_realtime_input(
+                    text=(
+                        "(Ya le has dicho al cliente que esperase. Llama ahora mismo a "
+                        f"gestionar_queja con nombre_cliente='{datos['nombre_cliente']}', "
+                        f"pedido='{datos['pedido']}' y una descripcion clara del problema "
+                        "que te ha contado - no le preguntes nada más antes, ya tienes todo "
+                        "lo que hace falta.)"
+                    )
+                )
             if self.tool_router.debe_colgar:
                 # El modelo ya llamó a finalizar_llamada en este turno (tras
                 # despedirse). Esperamos a que el altavoz termine de sonar
@@ -139,34 +235,40 @@ class PizzeriaCallSession:
         streaming continuo de audio es lo que el SDK desaconseja; text en
         send_realtime_input viaja por el mismo canal que el audio.
 
-        Si el pedido ya está confirmado, no preguntamos "¿sigues ahí?" (no
-        tiene sentido, ya no hay nada pendiente) — directamente le pedimos
-        al modelo que se despida y cuelgue con finalizar_llamada, que ya
-        espera a que el altavoz termine de sonar antes de cortar. Si ni con
-        eso reacciona, cortamos sin despedida como último recurso."""
+        Si ya no queda nada pendiente en la llamada (pedido confirmado, o
+        una incidencia ya gestionada vía gestionar_queja - ver
+        ToolRouter.nada_pendiente), no preguntamos "¿sigues ahí?" (no tiene
+        sentido si ya no hay nada que esperar) — directamente le pedimos al
+        modelo que se despida y cuelgue con finalizar_llamada, que ya espera
+        a que el altavoz termine de sonar antes de cortar. Si ni con eso
+        reacciona, cortamos sin despedida como último recurso. Sin esto, una
+        llamada de incidencia que el modelo olvidó cerrar con
+        finalizar_llamada caía en el mismo ciclo largo que una llamada
+        todavía en curso, y acababa preguntando "¿sigues ahí?" de la nada
+        después de que el cliente ya colgara mentalmente la conversación."""
         while True:
             await asyncio.sleep(IDLE_WATCHDOG_INTERVAL)
             idle_for = time.monotonic() - self._last_user_activity
 
-            if self.tool_router.order.confirmado:
+            if self.tool_router.nada_pendiente:
                 if idle_for > settings.idle_hangup_after_confirm_seconds:
                     raise CallEndedByIdle(
-                        f"{idle_for:.0f}s de silencio tras confirmar (el modelo no colgó solo "
-                        "ni siquiera tras pedírselo)"
+                        f"{idle_for:.0f}s de silencio con la llamada ya resuelta (el modelo no "
+                        "colgó solo ni siquiera tras pedírselo)"
                     )
                 if (
                     idle_for > settings.idle_post_confirm_nudge_seconds
                     and not self._idle_checkin_sent
                 ):
                     logger.info(
-                        "Pedido confirmado, cliente en silencio %.0fs - pidiendo despedida.",
+                        "Nada pendiente, cliente en silencio %.0fs - pidiendo despedida.",
                         idle_for,
                     )
                     self._idle_checkin_sent = True
                     await self.session.send_realtime_input(
-                        text="(El pedido ya está confirmado y el cliente no responde. "
-                        "Despídete brevemente y cuelga la llamada llamando a "
-                        "finalizar_llamada.)"
+                        text="(Ya no queda nada pendiente en esta llamada y el cliente no "
+                        "responde. NO repitas lo que ya le has contado. Despídete en una "
+                        "frase corta y llama a finalizar_llamada ahora mismo.)"
                     )
                 continue
 

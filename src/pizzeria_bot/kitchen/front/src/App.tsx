@@ -1,5 +1,6 @@
 import { ChatFAQ } from './components/chat/ChatFAQ'
 import { DevSimulador } from './components/dev/DevSimulador'
+import { PanelIncidencias } from './components/incidencias/PanelIncidencias'
 import { Header } from './components/kitchen/Header'
 import { Printer } from './components/kitchen/Printer'
 import { TicketRail } from './components/kitchen/TicketRail'
@@ -16,6 +17,7 @@ export function App() {
           <Printer ticket={printingTicket} onDone={onPrintDone} />
         </aside>
         <TicketRail tickets={tickets} />
+        <PanelIncidencias />
       </main>
       <ChatFAQ />
       <DevSimulador onSimular={encolarTicket} />

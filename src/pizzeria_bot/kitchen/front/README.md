@@ -1,9 +1,11 @@
 # front/ — Pantalla de cocina (React)
 
 Interfaz de la pantalla de cocina (`/kitchen`): la fila de tickets confirmados,
-la animación de la impresora y un chatbot de preguntas frecuentes. Consume el
-`WebSocket /kitchen/ws` y el `POST /faq/preguntar` que ya expone `server.py` —
-este proyecto no cambia el contrato del backend, solo cómo se renderiza.
+la animación de la impresora, un chatbot de preguntas frecuentes y un panel
+de incidencias pendientes de revisión. Consume el `WebSocket /kitchen/ws`, el
+`POST /faq/preguntar` y el `GET /incidencias/pendientes` que ya expone
+`server.py` — este proyecto no cambia el contrato del backend, solo cómo se
+renderiza.
 
 ## Desarrollo
 
@@ -16,11 +18,12 @@ npm run dev
 ```
 
 Abre la URL que imprima Vite (normalmente `http://localhost:5173`). El
-WebSocket y el `POST /faq/preguntar` se proxean automáticamente al backend
-en `:8000` (ver `vite.config.ts`), así que no hace falta tocar nada para
-que funcione en desarrollo. El chatbot de FAQ necesita además que el índice
-RAG esté generado (`python -m pizzeria_bot.rag.ingest`, ver `rag/README.md`)
-y `GEMINI_API_KEY` configurada — si no, el backend responde 502 a cada
+WebSocket, el `POST /faq/preguntar` y el `GET /incidencias/pendientes` se
+proxean automáticamente al backend en `:8000` (ver `vite.config.ts`), así
+que no hace falta tocar nada para que funcione en desarrollo. El chatbot de
+FAQ necesita además que el índice RAG esté generado
+(`python -m pizzeria_bot.rag.ingest`, ver `rag/README.md`) y
+`GEMINI_API_KEY` configurada — si no, el backend responde 502 a cada
 pregunta.
 
 ## Build para producción
@@ -49,6 +52,10 @@ no se reconstruye solo.
 - `src/components/chat/ChatFAQ.tsx` — asistente virtual (botón flotante +
   panel desplegable), habla contra `POST /faq/preguntar` (ver
   `rag/README.md`).
+- `src/components/incidencias/PanelIncidencias.tsx` — panel aparte (no
+  mezclado con los tickets del corcho) con las incidencias graves
+  escaladas a revisión humana, por polling cada 10s contra
+  `GET /incidencias/pendientes` (ver `agents/complaint_graph.py`).
 - `src/components/dev/DevSimulador.tsx` — botón de solo desarrollo para
   simular pedidos sin necesitar una llamada real (eliminado del build de
   producción, ver el propio archivo).

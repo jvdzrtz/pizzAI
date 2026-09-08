@@ -79,6 +79,46 @@ guardarlos. Y cuando la sesión de Gemini termina (el modelo cuelga, o el
 watchdog de inactividad corta), `server.py` cierra el WebSocket él mismo —
 si no, Twilio no tiene forma de saber que debe colgar la llamada real.
 
+## Gestión de incidencias/quejas (agents/complaint_graph.py)
+
+Si el cliente llama para reportar un problema con un **pedido anterior**
+(llegó tarde, frío, incompleto, cobro incorrecto...), el modelo usa la
+tool `gestionar_queja` en vez de tomar un pedido nuevo — esa llamada es
+exclusivamente para la incidencia. Por debajo es un grafo
+[LangGraph](https://langchain-ai.github.io/langgraph/) con dos agentes
+LLM reales que se pasan trabajo:
+
+1. **Agente FAQ** (`consultar_politica`): reutiliza tal cual
+   `rag.faq_chain.responder_faq()` para preguntar la política real
+   aplicable (p.ej. "¿cuál es la política de compensación por retraso en
+   la entrega?") — nunca se inventa una compensación en el prompt.
+2. **Agente de Quejas** (`clasificar_gravedad`): con la queja y esa
+   política real como contexto, clasifica la incidencia como
+   `menor`/`grave` (structured output) y decide si se resuelve al
+   momento (código de compensación) o se escala a revisión humana
+   (en memoria, `pizzeria_bot.agents.complaint_graph.listar_incidencias_pendientes()`).
+
+Las incidencias escaladas se ven en vivo en la pantalla de cocina
+(`GET /incidencias/pendientes`, panel aparte en `kitchen/front/`, por
+polling cada 10s — no WebSocket: `gestionar_queja` corre en un hilo
+aparte, ver más abajo, así que un push en vivo desde ahí cruzaría
+threads sin necesidad real).
+
+No hay ningún nodo "supervisor" en el grafo: el propio agente de voz
+(Gemini Live) ya decide, vía function calling, si una llamada es una
+incidencia o un pedido normal — añadir un supervisor aquí duplicaría
+ese enrutado.
+
+Necesita los extras `rag` y `complaints` instalados
+(`pip install -e ".[rag,complaints]"`) — con import perezoso, así que el
+bot de voz base (pedidos normales) sigue funcionando exactamente igual
+sin ellos, y solo falla si de verdad se invoca esta tool sin tenerlos.
+`gestionar_queja` tarda varios segundos (RAG + LLM clasificador) — se
+ejecuta en un hilo aparte (`asyncio.to_thread`, ver `main.py`) para no
+congelar el resto de la llamada (micro, altavoz, watchdog de silencio)
+mientras espera. Tests en `tests/test_complaint_graph.py` (FAQ y LLM
+clasificador mockeados, sin llamadas reales a Gemini).
+
 ## Instalación
 
 ### Requisito: PortAudio (solo Windows, solo para la CLI local)
@@ -252,17 +292,6 @@ docker run --env-file .env -p 8000:8000 pizzai
 
 Expón el puerto 8000 con ngrok (`ngrok http 8000`) igual que en local —
 ver la sección [Telefonía real (Twilio)](#telefonía-real-twilio).
-
-## Roadmap
-
-- [ ] Persistencia real de pedidos (Postgres) — ahora mismo `confirmar_pedido`
-      solo loguea, el pedido se pierde al colgar
-- [ ] `language_code` a `es-ES` en vez de `es-US` (main.py) — hoy hardcodeado
-- [ ] Forma de pago — no se pregunta ni se guarda
-- [ ] Vaciar el pedido entero de golpe ("olvídalo todo") — hoy solo se puede
-      quitar ítem a ítem con `quitar_item_pedido`
-- [ ] RAG sobre el menú (alérgenos, promociones dinámicas)
-- [ ] Orquestación LangGraph para flujos de pedido complejos
 
 ## Licencia
 

@@ -27,6 +27,7 @@ from google import genai
 from pydantic import BaseModel
 from twilio.request_validator import RequestValidator
 
+from pizzeria_bot.agents.complaint_graph import Incidencia, listar_incidencias_pendientes
 from pizzeria_bot.agents.tools import ToolRouter
 from pizzeria_bot.audio.twilio_io import TwilioAudioIO
 from pizzeria_bot.config import require_gemini_api_key, require_twilio_auth_token, settings
@@ -285,3 +286,18 @@ def faq_preguntar(cuerpo: PreguntaFAQ) -> RespuestaFAQ:
         ) from None
 
     return RespuestaFAQ(respuesta=respuesta)
+
+
+@app.get("/incidencias/pendientes")
+async def incidencias_pendientes() -> list[Incidencia]:
+    """Incidencias graves (agents/complaint_graph.py) escaladas a revisión
+    humana y aún sin resolver - panel de solo lectura para la pantalla de
+    cocina. Igual que /kitchen y /faq/preguntar, sin firma de Twilio ni
+    autenticación.
+
+    Por polling desde el front, no por WebSocket: a diferencia de los
+    tickets de pedido, gestionar_queja corre en un hilo aparte (ver
+    main.py: _TOOLS_LENTAS), así que emitir un evento en vivo desde ahí
+    cruzaría threads sin un beneficio real - no es un feed de alta
+    frecuencia que necesite latencia mínima."""
+    return listar_incidencias_pendientes()

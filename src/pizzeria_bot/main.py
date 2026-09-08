@@ -1,3 +1,27 @@
+"""
+Sesión de una llamada con Gemini Live: PizzeriaCallSession reenvía audio en
+ambas direcciones y despacha cada tool_call a ToolRouter. La misma clase
+sirve tanto para la CLI local (run(), micro/altavoz) como para el servidor
+Twilio (server.py crea una instancia por llamada entrante) - run_with_reconnect
+es el punto de entrada compartido por los dos.
+
+Dos mecanismos de robustez viven aquí, y merece la pena tenerlos claros:
+
+- Watchdog de silencio (_idle_watchdog): una tarea de fondo que vigila cuánto
+  lleva el cliente sin decir nada. Si pasa demasiado tiempo, empuja a Gemini a
+  reaccionar (o cuelga como último recurso) - ver su docstring para los dos
+  ritmos distintos que usa (llamada en curso vs. ya resuelta).
+- Nudges (fragmentos de texto que se mandan a mitad de llamada, vía
+  session.send_realtime_input): la forma de "avisar" a Gemini de algo sin
+  esperar a que el cliente hable. Son la única herramienta disponible para
+  esto, pero no una orden que el modelo cumpla siempre al pie de la letra -
+  varios comentarios en este fichero documentan casos reales donde Gemini no
+  siguió un nudge como se esperaba. Se usan solo donde no hay alternativa
+  mejor (idle_watchdog, y empujar a gestionar_queja tras avisar_espera_
+  incidencia - ver _handle_tool_call/_receive_and_play), nunca como sustituto
+  de una validación real cuando esta es posible (ver agents/tools.py).
+"""
+
 import asyncio
 import logging
 import time

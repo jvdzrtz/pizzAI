@@ -5,12 +5,39 @@ y "lo que entiende nuestro negocio" (Order, OrderError).
 """
 
 import logging
+from dataclasses import dataclass, field
 
 from pizzeria_bot.domain.menu import menu_as_dict
 from pizzeria_bot.domain.order import Order, OrderError
 from pizzeria_bot.kitchen.store import store as kitchen_store
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _EstadoIncidencia:
+    """Estado del flujo de incidencias de la llamada en curso - agrupado
+    aparte del resto de ToolRouter porque las cuatro piezas solo tienen
+    sentido juntas, no como atributos sueltos mezclados con los del pedido:
+
+    - gestionada: se ha resuelto al menos una incidencia en esta llamada
+      (ver ToolRouter.nada_pendiente).
+    - en_curso: hay una incidencia "a medias" ahora mismo - avisada con
+      avisar_espera_incidencia pero aún sin resolver con gestionar_queja.
+      Mientras esté a True: nada_pendiente es False (no hay que empujar a
+      colgar) y finalizar_llamada se rechaza (no se puede colgar a medias).
+    - ultimo_resultado: el resultado de la última incidencia resuelta - si
+      gestionar_queja se vuelve a llamar sin que haya arrancado una nueva
+      (en_curso sigue en False), es un reintento de ESTA, no una incidencia
+      distinta.
+    - descripciones_previas: las descripciones de las incidencias ya
+      resueltas, para que el clasificador de la siguiente las ignore si el
+      agente de voz las menciona de pasada."""
+
+    gestionada: bool = False
+    en_curso: bool = False
+    ultimo_resultado: dict | None = None
+    descripciones_previas: list[str] = field(default_factory=list)
 
 CONSULTAR_MENU = {
     "name": "consultar_menu",
@@ -226,42 +253,7 @@ class ToolRouter:
     def __init__(self) -> None:
         self.order = Order()
         self.debe_colgar = False
-        # Igual que order.confirmado: "no queda nada pendiente en esta
-        # llamada" pero para el flujo de incidencias en vez del de pedido
-        # (ver main.py: _idle_watchdog usa nada_pendiente para decidir si
-        # empujar al modelo a colgar rápido en vez de preguntar "¿sigues
-        # ahí?" con los tiempos largos de una llamada aún en curso).
-        self.queja_gestionada = False
-        # Se pone a True en cuanto arranca una incidencia nueva
-        # (avisar_espera_incidencia) y a False cuando se resuelve
-        # (gestionar_queja) - nada_pendiente NO debe ser true mientras
-        # esto esté en marcha. Sin esto, tras resolver una primera
-        # incidencia, nada_pendiente se quedaba en true para siempre, y si
-        # el cliente reportaba una SEGUNDA incidencia en la misma llamada,
-        # el watchdog seguía usando los tiempos cortos de "despídete" -
-        # empujando al modelo a colgar mientras la segunda incidencia
-        # todavía se estaba gestionando de verdad (visto en producción:
-        # se interrumpía justo al terminar gestionar_queja, antes de que
-        # el modelo llegara a contar la resolución de la segunda).
-        self.queja_en_curso = False
-        # Resultado de la última incidencia resuelta - se usa para
-        # detectar un reintento redundante de gestionar_queja (ver más
-        # abajo). Deduplicar comparando el texto de la descripción es
-        # frágil (dos frases distintas para la MISMA incidencia no
-        # coinciden tal cual, y dos incidencias DISTINTAS sobre el mismo
-        # pedido comparten casi todas las palabras de contexto) - lo
-        # fiable es el estado real del protocolo: si no ha habido un
-        # avisar_espera_incidencia nuevo desde la última resolución,
-        # cualquier llamada a gestionar_queja es un reintento de LO MISMO,
-        # nunca una incidencia nueva.
-        self._ultimo_resultado_queja: dict | None = None
-        # Descripciones de las incidencias YA resueltas en esta llamada
-        # (no la actual) - se le pasan al clasificador de la siguiente
-        # para que ignore cualquier mención de pasada a ellas (el agente
-        # de voz a veces mezcla "además del cobro ya reportado" en la
-        # descripción de una incidencia nueva, y eso confundía la
-        # clasificación de gravedad/compensación de la nueva).
-        self._descripciones_previas: list[str] = []
+        self._incidencia = _EstadoIncidencia()
         self._dispatch = {
             "consultar_menu": self._consultar_menu,
             "anadir_item_pedido": self._anadir_item_pedido,
@@ -357,13 +349,10 @@ class ToolRouter:
         return {"ok": True, "resumen": resumen}
 
     def _finalizar_llamada(self) -> dict:
-        # Bug real visto en producción: el modelo llamaba a
-        # avisar_espera_incidencia y, en vez de seguir con gestionar_queja,
-        # se despedía y colgaba directamente - la incidencia se quedaba a
-        # medias para siempre (nunca se consultó la política real, así que
-        # nunca hubo compensación que ofrecer). Colgar con una incidencia
-        # ya avisada pero sin resolver no puede pasar nunca.
-        if self.queja_en_curso:
+        # No se puede colgar con una incidencia avisada pero sin resolver
+        # (nunca se consultaría la política real, así que nunca habría
+        # compensación que ofrecer).
+        if self._incidencia.en_curso:
             raise ValueError(
                 "No puedes colgar todavía: le dijiste al cliente que ibas a revisar su "
                 "incidencia (avisar_espera_incidencia) pero aún no has llamado a "
@@ -374,21 +363,16 @@ class ToolRouter:
 
     @staticmethod
     def _validar_datos_incidencia(nombre_cliente: str, pedido: str) -> None:
-        # Obligatorios de verdad, no "si el modelo se acuerda": misma idea
+        # Obligatorios de verdad, no "si el modelo se acuerda" - misma idea
         # que domain/order.py validando nombre/dirección/teléfono antes de
-        # confirmar_pedido. Si el modelo llama a la tool sin haberlos
-        # preguntado, se lo decimos para que pueda recuperarse pidiéndolos
-        # en vez de seguir como si nada.
+        # confirmar_pedido.
         if not nombre_cliente or not nombre_cliente.strip():
             raise ValueError("Falta el nombre del cliente para registrar la incidencia.")
         if not pedido or not pedido.strip():
             raise ValueError("Falta qué había pedido el cliente para registrar la incidencia.")
-        # Visto en producción: el cliente nunca llegó a dar su nombre y el
-        # modelo, en vez de volver a preguntarlo, rellenó el parámetro
-        # obligatorio con un placeholder tipo "[Nombre del cliente]" - no
-        # vacío, así que colaba la validación de arriba sin más. Los
-        # corchetes son una señal fiable de que es un hueco sin rellenar,
-        # no un dato real que un cliente diría en voz alta.
+        # Corchetes = señal fiable de un placeholder sin rellenar (ej. "[Nombre
+        # del cliente]"), no algo que un cliente diría en voz alta - por sí
+        # sola, la validación de "no vacío" de arriba no pilla esto.
         if "[" in nombre_cliente or "]" in nombre_cliente:
             raise ValueError(
                 f"'{nombre_cliente}' no es un nombre real, parece un valor de relleno - "
@@ -401,40 +385,34 @@ class ToolRouter:
             )
 
     def _avisar_espera_incidencia(self, nombre_cliente: str, pedido: str) -> dict:
-        # Instantánea a propósito, sin tocar red ni RAG: el "primer paso"
-        # de gestionar_queja. Narrar el resultado de una tool sí funciona
-        # de forma fiable con Gemini Live (se ve en todas las tools) - lo
-        # que no funciona fiablemente es hacer que el modelo hable ANTES
-        # de invocar una tool lenta. Separando la espera en su propia tool
-        # instantánea, el modelo la "narra" como cualquier otro resultado
-        # en vez de tener que decidir hablar por su cuenta antes de llamar
-        # a gestionar_queja - y como es instantánea, no hay silencio real
-        # detrás de esta llamada en sí.
-        # Exige nombre_cliente/pedido también aquí (no solo en
-        # gestionar_queja): así el modelo no puede ni siquiera decir "dame
-        # un momento" sin haberlos preguntado antes.
+        # Instantánea a propósito, sin tocar red ni RAG - el "primer paso"
+        # de gestionar_queja (ver su docstring de más abajo para el porqué
+        # de este diseño en dos pasos). Exige nombre_cliente/pedido también
+        # aquí, no solo en gestionar_queja: así el modelo no puede ni
+        # siquiera decir "dame un momento" sin haberlos preguntado antes.
         self._validar_datos_incidencia(nombre_cliente, pedido)
-        self.queja_en_curso = True
+        self._incidencia.en_curso = True
         return {
             "ok": True,
             "mensaje_para_cliente": "Vale, dame un momento que reviso tu caso.",
         }
 
     def _gestionar_queja(self, descripcion: str, nombre_cliente: str, pedido: str) -> dict:
-        # Si no hay una incidencia "en curso" (es decir, no hubo un
-        # avisar_espera_incidencia nuevo desde la última vez que se
-        # resolvió una), esta llamada es un reintento redundante de la
-        # incidencia YA resuelta - no una nueva, por distinto que suene el
-        # texto de la descripción (bug real visto en producción: la misma
-        # incidencia registrándose dos veces con la descripción reformulada
-        # ligeramente, sin que el cliente hubiera dicho nada nuevo).
-        if not self.queja_en_curso and self._ultimo_resultado_queja is not None:
-            # A propósito SIN mensaje_para_cliente: si se lo devolviéramos
-            # tal cual (como antes), el modelo lo narraba de nuevo entero
-            # - "lamentamos mucho lo ocurrido... tu código es X..." una
-            # segunda vez, sonando repetido y raro (bug real visto en
-            # producción). Un aviso explícito de "no lo repitas" en vez del
-            # mensaje evita la re-narración.
+        """Segundo paso de la gestión de incidencias (ver
+        avisar_espera_incidencia para el primero). Deliberadamente en dos
+        pasos: esta hace llamadas de red reales (RAG + LLM clasificador),
+        varios segundos - separar un "aviso" instantáneo antes le da al
+        modelo algo que narrar de inmediato en vez de tener que decidir
+        hablar por su cuenta justo antes de una tool lenta.
+
+        Si no hay una incidencia "en curso" (no ha habido un
+        avisar_espera_incidencia nuevo desde la última resolución), esta
+        llamada es un reintento redundante de la incidencia YA resuelta -
+        no una nueva, por distinto que suene el texto de la descripción."""
+        if not self._incidencia.en_curso and self._incidencia.ultimo_resultado is not None:
+            # Sin mensaje_para_cliente a propósito: narrarlo nuevamente
+            # sonaría como si la incidencia se repitiera dos veces. Un
+            # aviso explícito de "no lo repitas" evita la re-narración.
             return {
                 "ok": True,
                 "aviso": "Esta incidencia ya se gestionó y ya le contaste el resultado al "
@@ -457,24 +435,29 @@ class ToolRouter:
             descripcion,
             nombre_cliente=nombre_cliente,
             pedido=pedido,
-            descripciones_previas=list(self._descripciones_previas),
+            descripciones_previas=list(self._incidencia.descripciones_previas),
         )
         logger.info("Queja gestionada: %s", resultado.get("detalle_interno"))
-        self._descripciones_previas.append(descripcion)
-        self._ultimo_resultado_queja = resultado
-        self.queja_gestionada = True
-        self.queja_en_curso = False
+        self._incidencia.descripciones_previas.append(descripcion)
+        self._incidencia.ultimo_resultado = resultado
+        self._incidencia.gestionada = True
+        self._incidencia.en_curso = False
         return {"ok": True, **resultado}
+
+    @property
+    def queja_gestionada(self) -> bool:
+        """Se ha resuelto al menos una incidencia en esta llamada. Expuesto
+        como propiedad (delega en _incidencia) por compatibilidad - el
+        resto del estado de incidencias vive agrupado en _EstadoIncidencia,
+        pero este flag concreto ya se usaba desde fuera de ToolRouter."""
+        return self._incidencia.gestionada
 
     @property
     def nada_pendiente(self) -> bool:
         """Ya no queda nada por hacer en esta llamada (pedido confirmado, o
-        incidencia ya gestionada) - lo usa main.py para saber si empujar al
-        modelo a colgar rápido en vez de preguntar "¿sigues ahí?" con los
-        tiempos largos de una llamada aún en curso. queja_en_curso excluye
-        el rato entre avisar_espera_incidencia y gestionar_queja de una
-        SEGUNDA incidencia en la misma llamada - si no, tras resolver la
-        primera esto se quedaba en true para siempre, y el watchdog
-        empujaba a colgar mientras la segunda aún se estaba gestionando
-        de verdad."""
-        return self.order.confirmado or (self.queja_gestionada and not self.queja_en_curso)
+        incidencia ya gestionada y ninguna otra en curso) - lo usa main.py
+        para saber si empujar al modelo a colgar rápido en vez de preguntar
+        "¿sigues ahí?" con los tiempos largos de una llamada aún en curso."""
+        return self.order.confirmado or (
+            self._incidencia.gestionada and not self._incidencia.en_curso
+        )

@@ -327,12 +327,17 @@ def gestionar_queja(
     "detalle_interno": {...}}.
     """
     grafo = build_graph()
+    # run_name/tags solo afectan a cómo se ve la traza en LangSmith (si
+    # está activado, ver config.py) - por defecto un grafo compilado
+    # aparece como "LangGraph" a secas, sin distinguir esta ejecución de
+    # cualquier otra.
     estado_final = grafo.invoke(
         {
             "descripcion": descripcion,
             "nombre_cliente": nombre_cliente,
             "pedido": pedido,
             "descripciones_previas": descripciones_previas or [],
-        }
+        },
+        config={"run_name": "gestionar_queja", "tags": ["incidencias"]},
     )
     return estado_final["resultado"]

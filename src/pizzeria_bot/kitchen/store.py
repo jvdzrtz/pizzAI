@@ -7,7 +7,8 @@ cuelgue de verdad, porque el pedido ya queda cerrado en ese momento.
 
 En memoria a propósito, no en base de datos: coherente con el resto del
 proyecto ahora mismo (confirmar_pedido tampoco persiste todavía, ver
-Roadmap del README) - los tickets desaparecen si se reinicia el servidor.
+"Limitaciones conocidas" del README) - los tickets desaparecen si se
+reinicia el servidor.
 """
 
 import asyncio

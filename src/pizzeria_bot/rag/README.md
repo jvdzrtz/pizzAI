@@ -1,16 +1,19 @@
 # rag/ — FAQ de políticas del restaurante (RAG)
 
-Módulo **aislado y standalone**: responde preguntas de horarios, métodos
-de pago, zona de reparto y normas usando solo el contenido real de los
-documentos que suba el dueño del restaurante — nunca inventa una política
-que no esté en esos documentos.
+Responde preguntas de horarios, métodos de pago, zona de reparto y normas
+usando solo el contenido real de los documentos que suba el dueño del
+restaurante — nunca inventa una política que no esté en esos documentos.
 
-No está conectado al agente de voz (`agents/tools.py`) ni a Twilio — eso
-sigue deliberadamente fuera del alcance de este módulo. Sí está conectado
-a `server.py` (endpoint `POST /faq/preguntar`) y al chatbot de la
-pantalla de cocina (`kitchen/front/`, columna derecha) — ver más abajo.
-El menú y los alérgenos tampoco pasan por aquí: van con lógica
-determinista aparte.
+Dos consumidores reales, ninguno reimplementa RAG por su cuenta:
+`server.py` llama a `responder_faq()` directamente (endpoint
+`POST /faq/preguntar`, el chatbot de la pantalla de cocina — ver más
+abajo), y `agents/complaint_graph.py` la reutiliza tal cual en su nodo
+`consultar_politica` para preguntar la política real aplicable antes de
+clasificar una queja (ver `agents/tools.py: gestionar_queja`) — es decir,
+el agente de voz telefónico SÍ pasa por aquí cuando gestiona una
+incidencia, aunque no para responder preguntas sueltas durante la toma de
+un pedido (ver "Pendiente" más abajo). El menú y los alérgenos tampoco
+pasan por aquí: van con lógica determinista aparte.
 
 ## Instalar
 
@@ -131,5 +134,10 @@ el WebSocket de `/kitchen/ws`.
 
 ## Pendiente (fuera de alcance de este módulo)
 
-- Conectar `responder_faq()` al agente de voz (por teléfono) — sigue
-  deliberadamente fuera de esta tarea.
+- Dar acceso a `responder_faq()` como una tool más del agente de voz
+  durante la TOMA DE UN PEDIDO (ej. "¿tenéis parking?" a mitad de pedir
+  pizza) — sigue deliberadamente fuera de esta tarea. Ojo: esto es
+  distinto de la gestión de incidencias, donde el agente de voz ya
+  reutiliza `responder_faq()` indirectamente (vía
+  `agents/complaint_graph.py`) para consultar la política real antes de
+  clasificar una queja — ver `agents/tools.py: gestionar_queja`.

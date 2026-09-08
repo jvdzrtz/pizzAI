@@ -17,7 +17,7 @@
 }
 
 /* Dentro de la impresora: sin chincheta, sin la animación de caída (la
-   entrada la controla el propio componente Printer). */
+   entrada la controla el propio componente ImpresoraAnimada). */
 .ticket--estatico {
   animation: none;
   box-shadow: none;

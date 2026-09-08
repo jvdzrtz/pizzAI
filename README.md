@@ -42,14 +42,53 @@ Todos estos tiempos de silencio son configurables por `.env` (ver
 
 ## Arquitectura
 
+```mermaid
+flowchart TB
+    Twilio["Twilio<br/>(Media Streams)"]
+    Mic["Micro / altavoz<br/>local"]
+    Session["PizzeriaCallSession<br/>(main.py)"]
+    Gemini["Gemini Live API<br/>(function calling)"]
+    Router["ToolRouter<br/>(agents/tools.py)"]
+    Order["Order<br/>(domain/order.py)"]
+    KitchenStore["kitchen/store.py"]
+
+    Twilio --> Session
+    Mic --> Session
+    Session <--> Gemini
+    Session -- tool_call --> Router
+    Router -- "pedido normal" --> Order
+    Order -- confirmar_pedido --> KitchenStore
+
+    subgraph Incidencias["Gestión de incidencias (LangGraph)"]
+        Graph["complaint_graph.py"]
+        FAQ["responder_faq()<br/>(RAG · Chroma)"]
+        LLM["Clasificador<br/>(Gemini, structured output)"]
+        Graph --> FAQ
+        Graph --> LLM
+    end
+
+    Router -- gestionar_queja --> Graph
+    Graph -- grave --> Incid["_incidencias_pendientes<br/>(memoria)"]
+
+    subgraph Cocina["Pantalla de cocina (kitchen/front, React)"]
+        UI["Panel de cocina"]
+    end
+
+    KitchenStore -- "WebSocket /kitchen/ws" --> UI
+    Incid -- "GET /incidencias/pendientes<br/>(polling 10s)" --> UI
+    UI -- "POST /faq/preguntar" --> FAQ
+
+    LangSmith["LangSmith<br/>(trazas, opcional)"]
+    FAQ -.-> LangSmith
+    Graph -.-> LangSmith
 ```
-Teléfono real (Twilio) ─┐
-                        ├─▶ AudioIO ─▶ PizzeriaCallSession (main.py) ◀───▶ Gemini Live API
-Mic / altavoz local    ─┘                                    │
-                                                               │ tool_call
-                                                               ▼
-                                                          ToolRouter (agents/) ─▶ Order (domain/)
-```
+
+El agente de voz (`main.py` + `agents/tools.py` + `domain/`) es Gemini Live
+crudo vía `google-genai` — no pasa por LangChain, así que no aparece en
+LangSmith aunque esté activado; sigue observándose por logs estructurados
+(`logging_config.py`). Solo lo que corre sobre runnables de LangChain (RAG
+y el grafo de incidencias) se traza — ver
+[Observabilidad](#observabilidad-langsmith) más abajo.
 
 - **`audio/`** — dos implementaciones de la misma interfaz (`AudioIO` en
   `protocol.py`): `LocalAudioIO` (micro/altavoz) y `TwilioAudioIO` (llamada
@@ -110,14 +149,74 @@ incidencia o un pedido normal — añadir un supervisor aquí duplicaría
 ese enrutado.
 
 Necesita los extras `rag` y `complaints` instalados
-(`pip install -e ".[rag,complaints]"`) — con import perezoso, así que el
-bot de voz base (pedidos normales) sigue funcionando exactamente igual
-sin ellos, y solo falla si de verdad se invoca esta tool sin tenerlos.
+(`pip install -e ".[rag,complaints]"` si solo usas la CLI local sin
+servidor) — con import perezoso **en `agents/tools.py`**, así que el bot
+de voz base (pedidos normales) sigue funcionando exactamente igual sin
+ellos, y solo falla si de verdad se invoca esta tool sin tenerlos. Ojo:
+esto NO aplica a `server.py`, que importa `agents.complaint_graph` y
+`rag.faq_chain` de forma normal (no perezosa) para exponer siempre
+`/incidencias/pendientes` y `/faq/preguntar` — por eso el extra `twilio`
+ya trae `rag` y `complaints` incluidos automáticamente (ver
+`pyproject.toml`); si vas a levantar el servidor no hace falta instalar
+nada aparte.
 `gestionar_queja` tarda varios segundos (RAG + LLM clasificador) — se
 ejecuta en un hilo aparte (`asyncio.to_thread`, ver `main.py`) para no
 congelar el resto de la llamada (micro, altavoz, watchdog de silencio)
 mientras espera. Tests en `tests/test_complaint_graph.py` (FAQ y LLM
 clasificador mockeados, sin llamadas reales a Gemini).
+
+## Observabilidad (LangSmith)
+
+[LangSmith](https://smith.langchain.com) traza las dos partes del sistema
+que corren sobre LangChain: la cadena RAG (`rag/faq_chain.py`) y el grafo
+de incidencias (`agents/complaint_graph.py`). Es justo donde más falta
+hace: ahí es donde un LLM toma una decisión no determinista (¿qué política
+aplica?, ¿es "menor" o "grave"?) y donde han salido los bugs reales más
+difíciles de depurar solo con logs de texto — ver una traza completa del
+grafo (política consultada → clasificación → rama tomada) hace evidente en
+la UI de LangSmith lo que antes había que reconstruir leyendo logs a mano.
+
+**Qué NO cubre:** el agente de voz principal (`main.py`, Gemini Live vía
+`google-genai` crudo) no pasa por ningún runnable de LangChain, así que no
+aparece aquí — sigue observándose por sus logs estructurados
+(`logging_config.py`), que es donde se ven los `tool_call`, las nudges y el
+watchdog de silencio.
+
+Activarlo (opcional, no hace falta para que nada funcione):
+
+```bash
+uv pip install -e ".[rag]"   # ya trae langsmith como dependencia
+```
+
+```bash
+# .env
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=tu_langsmith_api_key_aqui   # smith.langchain.com -> Settings -> API Keys
+LANGSMITH_PROJECT=pizzai                       # opcional, por defecto "pizzai"
+```
+
+Sin `LANGSMITH_TRACING=true`, todo funciona exactamente igual que hasta
+ahora — es puramente aditivo (ver `config.py`).
+
+## Limitaciones conocidas / próximos pasos
+
+Este proyecto tiene fines de portfolio, no es un sistema en producción —
+estas son omisiones deliberadas por alcance, no descuidos:
+
+- **Estado en memoria**: pedidos confirmados, incidencias pendientes y el
+  índice de tickets (`kitchen/store.py`, `agents/complaint_graph.py`) viven
+  en variables de proceso — se pierden al reiniciar. No hay base de datos.
+- **Un solo proceso**: no hay soporte para varias réplicas compartiendo
+  ese estado (necesitaría mover el estado a algo externo tipo Redis/Postgres).
+- **Sin rate limiting** en los endpoints públicos más allá de la
+  validación de firma de Twilio (`X-Twilio-Signature`) — nada impide, por
+  ejemplo, saturar `POST /faq/preguntar` a base de peticiones.
+- **Reintentos limitados**: Gemini Live sí reconecta solo si se cae a media
+  llamada (ver `main.py`), pero no hay fallback si Gemini o Twilio fallan
+  de forma persistente (p.ej. desviar a un humano o a un buzón de voz).
+- **Logs en texto plano** (`logging_config.py`), pensados para leer en
+  local durante el desarrollo — no en el formato JSON estructurado que
+  esperaría un stack de observabilidad real (Datadog, ELK...).
 
 ## Instalación
 

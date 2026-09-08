@@ -37,7 +37,7 @@ body {
 
 /* Fila, no columna: la impresora vive en su propia columna a la
    izquierda, separada del corcho. Así, cuando el papel va saliendo
-   (Printer.tsx anima su altura), solo crece dentro de su propia
+   (ImpresoraAnimada.tsx anima su altura), solo crece dentro de su propia
    columna - el corcho de al lado ni se entera, no se desplaza. */
 main {
   flex: 1;

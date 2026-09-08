@@ -3,9 +3,12 @@ Cadena de RAG para responder preguntas de FAQ/políticas del restaurante
 (horarios, métodos de pago, zona de reparto, normas) usando SOLO el
 contenido indexado en Chroma por rag/ingest.py.
 
-Módulo standalone (ver rag/README.md): no está conectado a agents/tools.py,
-a server.py ni a Twilio todavía - eso es un paso posterior deliberadamente
-fuera del alcance de este módulo.
+Dos consumidores reales (ver rag/README.md): server.py llama a
+responder_faq() directamente para el chatbot de FAQ
+(POST /faq/preguntar), y agents/complaint_graph.py la reutiliza tal cual
+en su nodo consultar_politica para preguntar la política real aplicable
+antes de clasificar una queja - en ningún caso se reimplementa RAG fuera
+de este módulo.
 """
 
 from collections.abc import Sequence
@@ -93,7 +96,10 @@ def build_chain(retriever: Runnable | None = None, llm: Runnable | None = None) 
 def responder_faq(pregunta: str) -> str:
     """Responde una pregunta de FAQ/políticas del restaurante usando RAG
     sobre rag_docs/ (indexado previamente con `python -m pizzeria_bot.rag.ingest`)."""
-    return build_chain().invoke(pregunta)
+    # run_name solo afecta a cómo se ve la traza en LangSmith (si está
+    # activado, ver config.py) - sin esto, cada llamada aparece como
+    # "RunnableSequence" a secas, indistinguible de cualquier otra cadena.
+    return build_chain().invoke(pregunta, config={"run_name": "responder_faq"})
 
 
 if __name__ == "__main__":

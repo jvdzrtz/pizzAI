@@ -17,40 +17,49 @@ dependencies = [
 audio-windows = [
     "PyAudioWPatch>=0.2.12.8; sys_platform == 'win32'",
 ]
-# Servidor de telefonía real (Twilio Media Streams). audioop-lts porque el
-# módulo audioop se quitó de la stdlib en Python 3.13+ (lo usa audio/codecs.py
-# para la conversión mu-law<->PCM); en 3.11/3.12 ya viene en la stdlib, de
-# ahí el marcador de versión.
+# RAG de FAQ/políticas del restaurante (rag/) - lo usa server.py
+# (POST /faq/preguntar, import normal a nivel de módulo) y, vía
+# agents/tools.py, agents/complaint_graph.py (ahí sí con import perezoso:
+# solo se carga si de verdad se invoca gestionar_queja, así que la CLI
+# local de solo-pedidos sigue sin arrastrar LangChain si no hace falta).
+# langsmith ya viene transitivo con langchain-core; se fija aquí explícito
+# porque es una dependencia real (trazas opcionales, ver LANGSMITH_TRACING
+# en config.py), no un accidente de resolución.
+rag = [
+    "langchain>=0.3",
+    "langchain-community>=0.3",
+    "langchain-google-genai>=2.0",
+    "langchain-chroma>=0.2",
+    "langsmith>=0.1",
+    "pypdf>=5.0",
+]
+# Agente de incidencias/quejas (agents/complaint_graph.py): grafo LangGraph
+# que reutiliza responder_faq() de rag/ para consultar políticas reales.
+# Necesita el extra "rag" instalado también - lo trae solo quien instale
+# "twilio" (ver más abajo); si solo quieres la CLI local y probar la tool
+# de incidencias sin montar el servidor, instala "rag,complaints" a mano.
+complaints = [
+    "langgraph>=0.2",
+]
+# Servidor de telefonía real (Twilio Media Streams, server.py). audioop-lts
+# porque el módulo audioop se quitó de la stdlib en Python 3.13+ (lo usa
+# audio/codecs.py para la conversión mu-law<->PCM); en 3.11/3.12 ya viene
+# incluido. server.py importa agents.complaint_graph y rag.faq_chain a
+# nivel de módulo (a diferencia de agents/tools.py, que sí es perezoso)
+# para exponer siempre /incidencias/pendientes y /faq/preguntar - por eso
+# este extra arrastra "rag" y "complaints": sin ellos, ni siquiera arranca
+# `uvicorn pizzeria_bot.server:app` (ModuleNotFoundError al importar).
 twilio = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     "audioop-lts>=0.2.1; python_version >= '3.13'",
     "twilio>=9.0",
     "python-multipart>=0.0.9",  # Starlette lo necesita para parsear el POST form-urlencoded de Twilio
+    "pizzAI[rag,complaints]",
 ]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
-]
-# RAG de FAQ/políticas del restaurante (rag/). Módulo aislado: no lo usa
-# ni server.py ni agents/tools.py todavía, por eso no está en las
-# dependencias base - así el bot de voz sigue instalándose sin arrastrar
-# todo LangChain si no hace falta.
-rag = [
-    "langchain>=0.3",
-    "langchain-community>=0.3",
-    "langchain-google-genai>=2.0",
-    "langchain-chroma>=0.2",
-    "pypdf>=5.0",
-]
-# Agente de incidencias/quejas (agents/complaint_graph.py): grafo LangGraph
-# que reutiliza responder_faq() de rag/ para consultar políticas reales.
-# Necesita el extra "rag" instalado también (pip install -e ".[rag,complaints]")
-# - no se duplica aquí a propósito. Import perezoso en tools.py/complaint_graph.py:
-# el bot de voz base sigue sin arrastrar ninguno de los dos extras si no se usa
-# la tool gestionar_queja.
-complaints = [
-    "langgraph>=0.2",
 ]
 
 [project.scripts]

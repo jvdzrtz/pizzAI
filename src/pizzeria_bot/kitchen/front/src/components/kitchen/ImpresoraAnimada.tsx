@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import './Printer.css'
+import './ImpresoraAnimada.css'
 
 interface Props<T> {
   item: T | null
@@ -14,10 +14,10 @@ const PARPADEO_MS = 250
 const SACAR_PAPEL_MS = 1900
 const PAUSA_FINAL_MS = 350
 
-/** La impresora física (Printer.tsx la usaba en exclusiva para tickets de
- * pedido) generalizada para imprimir cualquier cosa que se pueda "sacar en
- * papel" - ahora también las incidencias (ver PanelIncidencias.tsx). La
- * mecánica de la animación es idéntica, solo cambia qué se dibuja dentro. */
+/** La animación física de "imprimir" en sí, genérica sobre cualquier cosa
+ * que se pueda "sacar en papel" - App.tsx monta una única instancia y
+ * decide qué tarjeta pintar dentro (ticket o incidencia) según lo que la
+ * cola compartida (useColaImpresion) tenga en curso. */
 export function ImpresoraAnimada<T>({ item, idDe, onDone, children }: Props<T>) {
   const medidorRef = useRef<HTMLDivElement>(null)
   const [altura, setAltura] = useState(0)

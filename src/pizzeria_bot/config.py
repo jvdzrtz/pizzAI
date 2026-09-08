@@ -9,6 +9,8 @@ en el punto donde de verdad hace falta (crear el cliente de Gemini), no
 al importar este módulo.
 """
 
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -60,8 +62,39 @@ class Settings(BaseSettings):
     # pille a media frase.
     hangup_grace_seconds: float = 3.0
 
+    # Trazas de LangChain/LangGraph en LangSmith (https://smith.langchain.com).
+    # Solo cubre lo que corre sobre runnables de LangChain: rag/faq_chain.py
+    # (el chatbot de FAQ) y agents/complaint_graph.py (el grafo de
+    # incidencias) - el agente de voz en sí (main.py, Live API cruda vía
+    # google-genai) no pasa por LangChain y no aparece aquí; sigue
+    # log-eado como siempre (ver logging_config.py). Necesita el extra
+    # "rag" instalado, que ya trae langsmith como dependencia.
+    langsmith_tracing: bool = False
+    langsmith_api_key: str | None = None
+    langsmith_project: str = "pizzai"
+
 
 settings = Settings()
+
+
+def _propagar_langsmith(s: Settings) -> None:
+    """LangSmith se activa leyendo variables de entorno de verdad
+    (os.environ), no este objeto Settings - pydantic-settings carga .env
+    solo hacia sus propios campos, no lo vuelca al entorno del proceso.
+    Hay que propagarlo a mano para que LANGSMITH_TRACING en .env funcione
+    igual que el resto de opciones. setdefault en vez de asignación
+    directa: si el usuario ya las exportó él mismo en su shell, no las
+    pisamos. Función aparte (no código suelto a nivel de módulo) para
+    poder testear la propagación con un Settings de mentira, sin depender
+    del .env real ni de reload de módulo (ver tests/test_config.py)."""
+    if s.langsmith_tracing:
+        os.environ.setdefault("LANGSMITH_TRACING", "true")
+        os.environ.setdefault("LANGSMITH_PROJECT", s.langsmith_project)
+        if s.langsmith_api_key:
+            os.environ.setdefault("LANGSMITH_API_KEY", s.langsmith_api_key)
+
+
+_propagar_langsmith(settings)
 
 
 def require_gemini_api_key() -> str:

@@ -1,15 +1,7 @@
-import pytest
-from fastapi.testclient import TestClient
+from pizzeria_bot import server
 
-from pizzeria_bot import config, server
-
-
-@pytest.fixture
-def client(monkeypatch):
-    monkeypatch.setattr(config.settings, "gemini_api_key", "dummy-gemini-key")
-    monkeypatch.setattr(config.settings, "twilio_auth_token", "dummy-auth-token")
-    with TestClient(server.app) as c:
-        yield c
+# La fixture `client` vive en tests/conftest.py - compartida con
+# test_incidencias_endpoint.py, ambos la usan tal cual sin cambios.
 
 
 def test_faq_preguntar_devuelve_la_respuesta_del_rag(client, monkeypatch):

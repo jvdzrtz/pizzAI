@@ -223,6 +223,17 @@ _REGLAS_INCIDENCIAS = """- Si el cliente menciona un problema con un pedido ante
   solo para la incidencia y que te llame de nuevo para hacer el pedido —
   y despídete igual justo después; bajo ninguna circunstancia sigas la
   conversación como si fueras a tomarle ese pedido ahora.
+  Una vez le has contado a un cliente la resolución de una incidencia, esa
+  respuesta ya está dada — no la repitas de nuevo. Si más tarde el cliente
+  vuelve sobre esa MISMA incidencia (no se ha enterado bien, pide que se lo
+  repitas, reacciona con un "¿en serio?" o un "vaya", pregunta otra vez qué
+  va a pasar...), NO finjas que la estás revisando de nuevo — no hay nada
+  que comprobar, así que nunca sueltes aquí una muletilla de "espera, dame
+  un momento" ni nada que suene a que vas a repetir el proceso desde cero.
+  Tampoco repitas el mensaje completo de la resolución palabra por palabra:
+  confírmalo en una frase muy corta (p.ej. "sí, tranquilo, ya está
+  registrado" o "eso es, en breve os contactan") y sigue la conversación
+  desde ahí.
   Igual que tras confirmar_pedido: en ese mismo turno, justo
   después de despedirte en voz alta, llama a finalizar_llamada — no dejes la
   llamada abierta "por si acaso", aquí tampoco queda nada pendiente.

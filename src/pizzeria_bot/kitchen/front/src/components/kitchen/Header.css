@@ -1,37 +1,99 @@
+/* Cabecera tipo "chrome" de sistema (macOS/Apple TV): cristal esmerilado,
+   una línea de 1px casi invisible en vez de un borde grueso, y una sola
+   nota de color contenida en el icono - todo lo demás en escala de
+   grises para que se lea como un panel serio, no como una app de juguete. */
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 28px;
-  background: var(--fondo-panel);
-  border-bottom: 3px solid var(--acento);
+  padding: 14px 32px;
+  background: rgba(30, 28, 25, 0.72);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.marca {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.marca-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: rgba(193, 64, 31, 0.13);
+  border: 1px solid rgba(193, 64, 31, 0.25);
+  color: var(--acento);
+}
+
+.marca-texto {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.marca-eyebrow {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(232, 202, 168, 0.42);
 }
 
 header h1 {
   margin: 0;
-  font-size: 1.3rem;
-  letter-spacing: 0.02em;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--papel);
 }
-header h1 span {
-  color: var(--acento);
+
+.header-derecha {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.reloj {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: rgba(232, 202, 168, 0.38);
+  font-variant-numeric: tabular-nums;
+}
+
+.separador {
+  width: 1px;
+  height: 13px;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .estado {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.85rem;
-  color: var(--acento-suave);
+  gap: 7px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: rgba(232, 202, 168, 0.5);
+  transition: color 0.3s ease;
 }
-.punto {
-  width: 10px;
-  height: 10px;
+.estado.conectado {
+  color: rgba(232, 202, 168, 0.78);
+}
+
+.estado-punto {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: #8a1f1f;
   transition: background 0.3s ease;
 }
-.punto.conectado {
+.estado.conectado .estado-punto {
   background: var(--verde);
-  box-shadow: 0 0 8px var(--verde);
+  box-shadow: 0 0 6px var(--verde);
 }

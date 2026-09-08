@@ -1,7 +1,6 @@
 .panel-incidencias {
   display: flex;
   flex-direction: column;
-  min-height: 0;
   background: var(--fondo-panel);
   border: 1px solid rgba(193, 64, 31, 0.35);
   border-radius: 10px;
@@ -22,43 +21,15 @@
   color: rgba(232, 202, 168, 0.55);
 }
 
+/* Sin scroll propio - igual que el corcho de pedidos (TicketRail.css), las
+   incidencias se apilan hacia abajo y es la página entera la que crece
+   (y hace scroll si hace falta), no un cuadro pequeño dentro del panel. */
 .incidencias-lista {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  overflow-y: auto;
-}
-
-.incidencia-card {
-  background: rgba(193, 64, 31, 0.12);
-  border: 1px solid rgba(193, 64, 31, 0.4);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-
-.incidencia-tipo {
-  margin: 0 0 6px;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--acento-suave);
-  text-transform: capitalize;
-}
-
-.incidencia-dato {
-  margin: 0 0 4px;
-  font-size: 11.5px;
-  color: rgba(232, 202, 168, 0.8);
-}
-.incidencia-dato .etiqueta {
-  color: rgba(232, 202, 168, 0.5);
-}
-
-.incidencia-decision {
-  margin: 6px 0 0;
-  font-size: 11.5px;
-  color: rgba(232, 202, 168, 0.65);
-  font-style: italic;
+  align-items: center;
+  gap: 14px;
 }

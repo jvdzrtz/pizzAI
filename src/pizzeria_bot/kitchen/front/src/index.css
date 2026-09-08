@@ -46,7 +46,7 @@ main {
   /* Impresora + corcho a 4 columnas + panel de incidencias. El chat
      (ChatFAQ) no cuenta aquí: es un widget flotante con position:fixed,
      fuera de este layout. */
-  max-width: 1860px;
+  max-width: 1880px;
   width: 100%;
   margin: 0 auto;
 }
@@ -61,5 +61,5 @@ main {
 }
 
 .panel-incidencias {
-  flex: 0 0 300px;
+  flex: 0 0 320px;
 }

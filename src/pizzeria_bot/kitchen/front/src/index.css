@@ -9,6 +9,9 @@
   --verde: #4caf7d;
   --mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   --sans: -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* Solo para el nombre de marca en la cabecera (Header.tsx) - el resto
+     de la interfaz sigue en --sans. */
+  --serif: 'Fraunces', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
 }
 
 * {

@@ -1,99 +1,130 @@
-/* Cabecera tipo "chrome" de sistema (macOS/Apple TV): cristal esmerilado,
-   una línea de 1px casi invisible en vez de un borde grueso, y una sola
-   nota de color contenida en el icono - todo lo demás en escala de
-   grises para que se lea como un panel serio, no como una app de juguete. */
+/* Cálida pero cuidada: serif de marca + sello con degradado tipo horno de
+   leña le dan personalidad de restaurante; el resto (cristal esmerilado,
+   línea de 1px, tipografía sans para todo lo demás) mantiene el mismo
+   nivel de acabado "producto serio" que el resto del panel. */
 header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 32px;
-  background: rgba(30, 28, 25, 0.72);
+  height: 64px;
+  padding: 0 28px;
+  background:
+    radial-gradient(140px circle at 56px 50%, rgba(193, 64, 31, 0.16), transparent 70%),
+    linear-gradient(180deg, rgba(41, 36, 30, 0.82), rgba(24, 21, 18, 0.82));
   backdrop-filter: blur(20px) saturate(160%);
   -webkit-backdrop-filter: blur(20px) saturate(160%);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 1px solid rgba(232, 202, 168, 0.1);
 }
 
 .marca {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
-.marca-logo {
+.marca-sello {
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  background: rgba(193, 64, 31, 0.13);
-  border: 1px solid rgba(193, 64, 31, 0.25);
-  color: var(--acento);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%, #ff9b5c, var(--acento) 55%, #7a2c15 100%);
+  box-shadow:
+    0 3px 10px rgba(193, 64, 31, 0.4),
+    inset 0 1px 1px rgba(255, 255, 255, 0.3);
+  font-family: var(--serif);
+  font-weight: 600;
+  font-style: italic;
+  font-size: 16px;
+  color: #fff5e8;
 }
 
 .marca-texto {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.marca-eyebrow {
-  font-size: 10.5px;
-  font-weight: 500;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: rgba(232, 202, 168, 0.42);
-}
-
-header h1 {
   margin: 0;
-  font-size: 1.15rem;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.marca-nombre {
+  font-family: var(--serif);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: 19px;
+  letter-spacing: 0.002em;
   color: var(--papel);
+}
+
+.marca-seccion {
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(232, 202, 168, 0.55);
 }
 
 .header-derecha {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
 }
 
 .reloj {
   font-family: var(--mono);
-  font-size: 0.8rem;
-  color: rgba(232, 202, 168, 0.38);
+  font-size: 13px;
+  color: rgba(232, 202, 168, 0.45);
   font-variant-numeric: tabular-nums;
 }
 
-.separador {
+.divisor {
   width: 1px;
-  height: 13px;
-  background: rgba(255, 255, 255, 0.1);
+  height: 14px;
+  background: rgba(232, 202, 168, 0.15);
 }
 
 .estado {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 0.78rem;
+  font-size: 12.5px;
   font-weight: 500;
-  color: rgba(232, 202, 168, 0.5);
-  transition: color 0.3s ease;
+  color: rgba(232, 202, 168, 0.55);
 }
 .estado.conectado {
-  color: rgba(232, 202, 168, 0.78);
+  color: rgba(232, 202, 168, 0.8);
 }
 
 .estado-punto {
+  position: relative;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: #8a1f1f;
-  transition: background 0.3s ease;
 }
+
 .estado.conectado .estado-punto {
   background: var(--verde);
-  box-shadow: 0 0 6px var(--verde);
+}
+.estado.conectado .estado-punto::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: var(--verde);
+  opacity: 0.45;
+  animation: latido 2s ease-out infinite;
+}
+
+@keyframes latido {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.45;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
 }

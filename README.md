@@ -1,5 +1,7 @@
 # pizzAI 🍕📞
 
+*[English version](README.en.md)*
+
 Agente de voz en tiempo real que atiende llamadas telefónicas y toma
 pedidos de pizza, construido sobre la Live API de Gemini con function
 calling.

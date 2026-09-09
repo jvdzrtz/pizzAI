@@ -63,8 +63,8 @@ flowchart TB
         Graph["complaint_graph.py"]
         FAQ["responder_faq()<br/>(RAG · Chroma)"]
         LLM["Clasificador<br/>(Gemini, structured output)"]
-        Graph --> FAQ
-        Graph --> LLM
+        Graph -- "1. consultar_politica" --> FAQ
+        FAQ -- "2. política real" --> LLM
     end
 
     Router -- gestionar_queja --> Graph
